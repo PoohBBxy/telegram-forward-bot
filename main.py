@@ -8,6 +8,7 @@ import time
 import random
 from datetime import datetime
 import logging
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
@@ -20,6 +21,7 @@ WELCOME_MSG = """👋 欢迎使用智能客服机器人！
 - 输入 /help 查看使用说明
 - 输入 /about 了解更多关于我们的信息
 - 试试触发隐藏彩蛋吧！"""
+
 
 # --- 数据管理 ---
 
@@ -52,9 +54,11 @@ def load_data():
             "pending_actions": {}
         }
 
+
 def save_data(data):
     with open(DB_FILE, "w") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
 
 # --- 词库管理 ---
 
@@ -65,16 +69,19 @@ def load_keywords():
     except (FileNotFoundError, json.JSONDecodeError):
         return {
             "eggs": [
-                {"keywords": ["彩蛋", "惊喜", "秘密"], "reply": "🎉 恭喜你发现隐藏彩蛋！🎁\n你获得了一次虚拟抽奖机会：\n\n🎲 正在抽奖...\n\n✨ 恭喜获得：{prize}"},
+                {"keywords": ["彩蛋", "惊喜", "秘密"],
+                 "reply": "🎉 恭喜你发现隐藏彩蛋！🎁\n你获得了一次虚拟抽奖机会：\n\n🎲 正在抽奖...\n\n✨ 恭喜获得：{prize}"},
                 {"keywords": ["测试", "功能"], "reply": "这是一个测试回复，用于验证关键词匹配功能。"},
                 {"keywords": ["你好", "hi", "hello"], "reply": "👋 你好！有什么我可以帮助你的吗？"}
             ],
             "prizes": ["100积分", "优惠券", "虚拟鲜花", "神秘礼品", "再次抽奖机会"]
         }
 
+
 def save_keywords(data):
     with open(KEYWORD_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
 
 # --- 消息发送/响应函数 ---
 
@@ -84,10 +91,10 @@ def send_message(chat_id, text, reply_markup=None, retries=5, delay=2):
         "text": text,
         "parse_mode": "HTML"
     }
-    
+
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    
+
     logging.info(f"尝试发送消息到用户 {chat_id}: {text[:50]}...")
     for attempt in range(retries):
         try:
@@ -100,7 +107,7 @@ def send_message(chat_id, text, reply_markup=None, retries=5, delay=2):
             logging.info(f"消息成功发送到用户 {chat_id}")
             return {"status": "success", "result": response.json()}
         except requests.exceptions.RequestException as e:
-            error_msg = f"发送消息到 {chat_id} 失败 (尝试 {attempt+1}/{retries}): {str(e)}"
+            error_msg = f"发送消息到 {chat_id} 失败 (尝试 {attempt + 1}/{retries}): {str(e)}"
             logging.error(error_msg)
             try:
                 if hasattr(e, 'response') and e.response:
@@ -127,6 +134,7 @@ def send_message(chat_id, text, reply_markup=None, retries=5, delay=2):
     logging.error(error_description)
     return {"status": "error", "error": "max_retries_exceeded", "description": error_description}
 
+
 def answer_callback_query(callback_query_id, text=None, show_alert=False):
     payload = {"callback_query_id": callback_query_id}
     if text:
@@ -135,12 +143,13 @@ def answer_callback_query(callback_query_id, text=None, show_alert=False):
         payload["show_alert"] = True
     requests.post(f"{BOT_URL}/answerCallbackQuery", json=payload)
 
+
 # --- 统计功能 ---
 
 def update_stats(message_type="user_message", increment=1):
     data = load_data()
     stats = data["stats"]
-    
+
     if message_type == "user_message":
         stats["messages_received"] += increment
     elif message_type == "admin_reply":
@@ -151,40 +160,42 @@ def update_stats(message_type="user_message", increment=1):
         stats["blacklist_count"] = len(data["blacklist"])
     elif message_type == "egg_hit":
         stats["egg_hits"] += increment
-    
+
     save_data(data)
+
 
 # --- 彩蛋系统 ---
 
 def process_egg_keywords(text):
     keywords_data = load_keywords()
     eggs = keywords_data.get("eggs", [])
-    
+
     for egg in eggs:
         for keyword in egg["keywords"]:
             if keyword.lower() in text.lower():
                 reply = egg["reply"]
-                
+
                 # 处理动态内容
                 if "{prize}" in reply and "prizes" in keywords_data:
                     prizes = keywords_data["prizes"]
                     prize = random.choice(prizes)
                     reply = reply.format(prize=prize)
-                
+
                 elif "{time}" in reply:
                     current_time = datetime.now().strftime("%H:%M:%S")
                     reply = reply.replace("{time}", current_time)
-                
+
                 elif "{date}" in reply:
                     current_date = datetime.now().strftime("%Y年%m月%d日")
                     reply = reply.replace("{date}", current_date)
-                
+
                 # 更新统计
                 update_stats("egg_hit")
-                
+
                 return reply
-    
+
     return None
+
 
 # --- Webhook 路由 ---
 
@@ -197,16 +208,17 @@ def webhook():
     elif "message" in data:
         message = data["message"]
         user_id = message["from"]["id"]
-        
+
         # 更新统计信息
         update_stats()
-        
+
         if user_id == ADMIN_ID:
             handle_admin_message(message)
         else:
             handle_user_message(message)
 
     return "ok", 200
+
 
 # --- 用户消息处理 ---
 
@@ -227,14 +239,14 @@ def handle_user_message(message):
     # 记录用户信息
     if str(user_id) not in data["users"]:
         data["users"][str(user_id)] = {
-            "username": username, 
+            "username": username,
             "first_seen": int(time.time()),
             "messages_count": 0
         }
         update_stats("new_user")
     else:
         data["users"][str(user_id)]["messages_count"] += 1
-    
+
     save_data(data)
 
     # 处理命令和关键词
@@ -280,90 +292,80 @@ def handle_user_message(message):
         }
         send_message(ADMIN_ID, forward_text, reply_markup=json.dumps(keyboard))
 
+
 # --- 管理员消息处理 ---
 
 def handle_admin_message(message):
-    text = message.get("text", "")
-    message_id = message["message_id"]
+    text = message.get("text", "").strip()
+    message_id = str(message["message_id"])
     user_id = message["from"]["id"]
 
     data = load_data()
-
-    # 处理管理员回复用户消息的情况
     reply_to_message = message.get("reply_to_message")
-    if reply_to_message and reply_to_message.get("from", {}).get("id") == ADMIN_ID:
-        if "text" in reply_to_message:
-            text_content = reply_to_message["text"]
-            if "💬 请直接回复此消息来回复用户" in text_content:
-                match = re.search(r"用户 (\d+)", text_content)
-                if not match:
-                    send_message(ADMIN_ID, "❌ 无法解析目标用户ID，请检查消息格式！")
-                    return
-                target_id = match.group(1)
-                if not text.strip():
-                    send_message(ADMIN_ID, "❌ 回复内容不能为空！")
-                    return
-                
-                # 发送回复给用户
-                reply_text = f"📨 管理员回复：\n\n{text}"
-                result = send_message(int(target_id), reply_text)
-                
-                if result["status"] == "success":
-                    send_message(ADMIN_ID, f"✅ 回复已成功发送给用户 {target_id}。")
-                    update_stats("admin_reply")
-                else:
-                    error_msg = {
-                        "user_blocked": f"❌ 无法发送消息给用户 {target_id}：用户已拉黑机器人。",
-                        "chat_not_found": f"❌ 无法发送消息给用户 {target_id}：用户不存在或未启动机器人。",
-                        "api_error": f"❌ 发送消息失败：{result['description']}",
-                        "unknown": f"❌ 未知错误：{result['description']}"
-                    }.get(result["error"], f"❌ 发送消息失败：{result['description']}")
-                    send_message(ADMIN_ID, error_msg)
-                return
 
-    # 检查是否是回复消息
-    reply_to_message = message.get("reply_to_message")
+    # 情况 1：回复的是 Bot 发出的 "请直接回复此消息来回复用户 ..." 提示
+    if reply_to_message and "💬 请直接回复此消息来回复用户" in reply_to_message.get("text", ""):
+        match = re.search(r"用户 (\d+)", reply_to_message["text"])
+        if not match:
+            send_message(ADMIN_ID, "❌ 无法解析目标用户ID，请检查消息格式！")
+            return
+
+        target_id = match.group(1)
+        if not text:
+            send_message(ADMIN_ID, "❌ 回复内容不能为空！")
+            return
+
+        # 发送管理员回复给目标用户
+        reply_text = f"📨 管理员回复：\n\n{text}"
+        result = send_message(int(target_id), reply_text)
+
+        if result["status"] == "success":
+            send_message(ADMIN_ID, f"✅ 回复已成功发送给用户 {target_id}。")
+            update_stats("admin_reply")
+        else:
+            error_msg = {
+                "user_blocked": f"❌ 用户 {target_id} 已拉黑机器人，无法发送消息。",
+                "chat_not_found": f"❌ 用户 {target_id} 不存在或未启动机器人。",
+                "api_error": f"❌ 发送失败：{result['description']}",
+                "unknown": f"❌ 未知错误：{result['description']}"
+            }.get(result.get("error", "unknown"), f"❌ 错误：{result['description']}")
+            send_message(ADMIN_ID, error_msg)
+        return
+
+    # 情况 2：回复的是之前 bot 发出的 ForceReply 消息，判断是否在待处理操作中
     if reply_to_message:
-        reply_to_msg_id = reply_to_message["message_id"]
-        
-        data = load_data()
-        pending_key = str(reply_to_msg_id)
-        
-        # 检查回复的消息是否在待处理操作中
-        if pending_key in data.get("pending_actions", {}):
-            action = data["pending_actions"].pop(pending_key)
+        reply_to_msg_id = str(reply_to_message["message_id"])
+        pending_actions = data.get("pending_actions", {})
+        if reply_to_msg_id in pending_actions:
+            action = pending_actions.pop(reply_to_msg_id)
             save_data(data)
-            
+
+            target_id = action["target_id"]
+
             if action["type"] == "block":
-                target_id = action["target_id"]
-                reason = text.strip()
-                
+                reason = text
                 if not reason:
                     send_message(ADMIN_ID, "❌ 拉黑原因不能为空！")
-                    # 重新添加待处理操作
-                    data = load_data()
-                    data["pending_actions"][pending_key] = action
+                    # 重新放回 pending_actions
+                    data["pending_actions"][reply_to_msg_id] = action
                     save_data(data)
                     return
-                    
-                # 执行拉黑操作
-                data = load_data()
+
                 if target_id not in data["blacklist"]:
                     data["blacklist"][target_id] = reason
                     save_data(data)
                     update_stats("blacklist")
-                    send_message(ADMIN_ID, f"✅ 用户 {target_id} 已被加入黑名单。\n原因: {reason}")
-                    
-                    # 通知被拉黑用户
+                    send_message(ADMIN_ID, f"✅ 用户 {target_id} 已被拉黑。\n原因: {reason}")
                     try:
-                        send_message(int(target_id), f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}")
+                        send_message(int(target_id),
+                                     f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}")
                     except Exception as e:
-                        print(f"向 {target_id} 发送拉黑通知失败：{e}")
+                        logging.warning(f"通知用户 {target_id} 拉黑失败：{e}")
                 else:
                     current_reason = data["blacklist"][target_id]
-                    send_message(ADMIN_ID, f"ℹ️ 用户 {target_id} 已在黑名单中。\n当前原因: {current_reason}")
-                
-                # 更新原始消息
+                    send_message(ADMIN_ID, f"ℹ️ 用户 {target_id} 已在黑名单中。\n原因: {current_reason}")
+
+                # 更新原始按钮消息为“已处理”
                 try:
                     requests.post(f"{BOT_URL}/editMessageText", json={
                         "chat_id": action["original_chat_id"],
@@ -372,74 +374,57 @@ def handle_admin_message(message):
                         "reply_markup": json.dumps({"inline_keyboard": []})
                     })
                 except Exception as e:
-                    print(f"更新原始消息失败: {e}")
-                    
-                return
+                    logging.warning(f"更新原始拉黑按钮消息失败：{e}")
 
             elif action["type"] == "reply":
-                target_id = action["target_id"]
-                reply_text = text.strip()
+                reply_text = text
                 if not reply_text:
                     send_message(ADMIN_ID, "❌ 回复内容不能为空！")
                     return
-                # 真正转发给用户
+
                 send_message(int(target_id), f"📨 管理员回复：\n\n{reply_text}")
                 send_message(ADMIN_ID, f"✅ 已成功回复用户 {target_id}")
                 update_stats("admin_reply")
             return
 
-    
-    # 检查是否是待处理的操作
-    if str(message_id) in data.get("pending_actions", {}):
-        action = data["pending_actions"].pop(str(message_id))
+    # 情况 3：最后兜底，直接 message_id 命中 pending_actions 的情况（极少出现）
+    if message_id in data.get("pending_actions", {}):
+        action = data["pending_actions"].pop(message_id)
         save_data(data)
-        
+
         if action["type"] == "block":
             target_id = action["target_id"]
             reason = text
-            
-            if not reason.strip():
+
+            if not reason:
                 send_message(ADMIN_ID, "❌ 拉黑原因不能为空！")
                 return
-                
-            # 执行拉黑操作
+
             if target_id not in data["blacklist"]:
                 data["blacklist"][target_id] = reason
                 save_data(data)
                 update_stats("blacklist")
-                send_message(ADMIN_ID, f"✅ 用户 {target_id} 已被加入黑名单。\n原因: {reason}")
-                
-                # 通知被拉黑用户
+                send_message(ADMIN_ID, f"✅ 用户 {target_id} 已被拉黑。\n原因: {reason}")
                 try:
-                    send_message(int(target_id), f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}")
+                    send_message(int(target_id),
+                                 f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}")
                 except Exception as e:
-                    print(f"向 {target_id} 发送拉黑通知失败：{e}")
+                    logging.warning(f"向 {target_id} 发送拉黑通知失败：{e}")
             else:
                 current_reason = data["blacklist"][target_id]
                 send_message(ADMIN_ID, f"ℹ️ 用户 {target_id} 已在黑名单中。\n当前原因: {current_reason}")
-            
-            # 更新原始消息
+
+            # 更新原始消息内容
             try:
-                original_chat_id = action["original_chat_id"]
-                original_message_id = action["original_message_id"]
-                
-                # 获取原始消息
-                msg = requests.get(f"{BOT_URL}/getMessage?chat_id={original_chat_id}&message_id={original_message_id}").json()
-                if msg.get("ok"):
-                    original_text = msg["result"]["text"]
-                    new_text = f"[已处理] {original_text}"
-                    
-                    # 移除键盘
-                    requests.post(f"{BOT_URL}/editMessageText", json={
-                        "chat_id": original_chat_id,
-                        "message_id": original_message_id,
-                        "text": new_text,
-                        "reply_markup": json.dumps({"inline_keyboard": []})
-                    })
+                requests.post(f"{BOT_URL}/editMessageText", json={
+                    "chat_id": action["original_chat_id"],
+                    "message_id": action["original_message_id"],
+                    "text": f"[已处理] 用户 {target_id} 已被拉黑",
+                    "reply_markup": json.dumps({"inline_keyboard": []})
+                })
             except Exception as e:
-                print(f"更新原始消息失败: {e}")
-                
-            return
+                logging.warning(f"更新原始按钮消息失败：{e}")
+        return
 
     if text.startswith("/"):
         parts = text.split(" ", 1)
@@ -476,7 +461,7 @@ def handle_admin_message(message):
                 return
 
             user_id_to_block, reason = args.split(" ", 1)
-            
+
             if not user_id_to_block.isdigit():
                 send_message(ADMIN_ID, "❌ 用户ID必须为数字！")
                 return
@@ -487,10 +472,11 @@ def handle_admin_message(message):
                 save_data(data)
                 update_stats("blacklist")
                 send_message(ADMIN_ID, f"✅ 用户 {user_id_to_block} 已被加入黑名单。\n原因: {reason}")
-                
+
                 # 通知被拉黑用户
                 try:
-                    send_message(int(user_id_to_block), f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}")
+                    send_message(int(user_id_to_block),
+                                 f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}")
                 except Exception as e:
                     print(f"向 {user_id_to_block} 发送拉黑通知失败：{e}")
             else:
@@ -530,7 +516,7 @@ def handle_admin_message(message):
             data = load_data()
             stats = data["stats"]
             active_users = len(data["users"]) - len(data["blacklist"])
-            
+
             message = "📊 机器人统计信息:\n\n"
             message += f"👥 总用户数: {stats['users_count']}\n"
             message += f"👤 活跃用户: {active_users}\n"
@@ -538,12 +524,12 @@ def handle_admin_message(message):
             message += f"💬 收到消息总数: {stats['messages_received']}\n"
             message += f"↩️ 发送回复总数: {stats['replies_sent']}\n"
             message += f"🥚 彩蛋触发次数: {stats['egg_hits']}\n"
-            
+
             # 计算回复率
             if stats['messages_received'] > 0:
                 reply_rate = (stats['replies_sent'] / stats['messages_received']) * 100
                 message += f"📊 回复率: {reply_rate:.2f}%\n"
-            
+
             message += f"\n📅 数据更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}"
             send_message(ADMIN_ID, message)
 
@@ -571,6 +557,7 @@ def handle_admin_message(message):
 /egg - 彩蛋关键词管理
 /help - 显示此帮助信息"""
             send_message(ADMIN_ID, help_text)
+
 
 # --- 按钮操作处理 ---
 
@@ -634,7 +621,8 @@ def handle_callback_query(callback_query):
                 "force_reply": True,
                 "input_field_placeholder": "格式: 关键词1,关键词2|回复内容"
             })
-            msg = send_message(ADMIN_ID, "请输入彩蛋信息 (格式: 关键词1,关键词2|回复内容):", reply_markup=force_reply_markup)
+            msg = send_message(ADMIN_ID, "请输入彩蛋信息 (格式: 关键词1,关键词2|回复内容):",
+                               reply_markup=force_reply_markup)
             if not msg or "message_id" not in msg:
                 answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
                 return
@@ -642,18 +630,18 @@ def handle_callback_query(callback_query):
 
         elif subcommand == "list":
             eggs = keywords_data.get("eggs", [])
-            
+
             if not eggs:
                 send_message(ADMIN_ID, "📭 当前没有设置任何彩蛋关键词。")
                 answer_callback_query(query_id)
                 return
-                
+
             lines = []
             for i, egg in enumerate(eggs, 1):
                 keywords = ", ".join(egg["keywords"])
                 reply = egg["reply"][:50] + ("..." if len(egg["reply"]) > 50 else "")
                 lines.append(f"{i}. 关键词: {keywords}\n   回复: {reply}")
-                
+
             text = "🥚 彩蛋关键词列表:\n\n" + "\n\n".join(lines)
             keyboard = {
                 "inline_keyboard": [
@@ -670,17 +658,17 @@ def handle_callback_query(callback_query):
 
         elif subcommand == "delete":
             eggs = keywords_data.get("eggs", [])
-            
+
             if not eggs:
                 send_message(ADMIN_ID, "📭 当前没有设置任何彩蛋关键词。")
                 answer_callback_query(query_id)
                 return
-                
+
             lines = []
             for i, egg in enumerate(eggs, 1):
                 keywords = ", ".join(egg["keywords"])
                 lines.append(f"{i}. {keywords}")
-                
+
             text = "请选择要删除的彩蛋:\n\n" + "\n".join(lines)
             force_reply_markup = json.dumps({
                 "force_reply": True,
@@ -690,7 +678,7 @@ def handle_callback_query(callback_query):
             if not msg or "message_id" not in msg:
                 answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
                 return
-                
+
             # 存储待处理的删除操作
             data = load_data()
             data.setdefault("pending_actions", {})
@@ -700,7 +688,7 @@ def handle_callback_query(callback_query):
                 "original_chat_id": chat_id
             }
             save_data(data)
-            
+
             answer_callback_query(query_id)
 
         elif subcommand == "prize":
@@ -734,12 +722,12 @@ def handle_callback_query(callback_query):
 
         elif subcommand == "prize_list":
             prizes = keywords_data.get("prizes", [])
-            
+
             if not prizes:
                 send_message(ADMIN_ID, "📭 当前没有设置任何奖品。")
                 answer_callback_query(query_id)
                 return
-                
+
             lines = [f"{i}. {prize}" for i, prize in enumerate(prizes, 1)]
             text = "🎁 奖品列表:\n\n" + "\n".join(lines)
             keyboard = {
@@ -757,12 +745,12 @@ def handle_callback_query(callback_query):
 
         elif subcommand == "prize_delete":
             prizes = keywords_data.get("prizes", [])
-            
+
             if not prizes:
                 send_message(ADMIN_ID, "📭 当前没有设置任何奖品。")
                 answer_callback_query(query_id)
                 return
-                
+
             lines = [f"{i}. {prize}" for i, prize in enumerate(prizes, 1)]
             text = "请选择要删除的奖品:\n\n" + "\n".join(lines)
             force_reply_markup = json.dumps({
@@ -773,7 +761,7 @@ def handle_callback_query(callback_query):
             if not msg or "message_id" not in msg:
                 answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
                 return
-                
+
             # 存储待处理的删除操作
             data = load_data()
             data.setdefault("pending_actions", {})
@@ -783,14 +771,14 @@ def handle_callback_query(callback_query):
                 "original_chat_id": chat_id
             }
             save_data(data)
-            
+
             answer_callback_query(query_id)
 
     elif data.startswith("reply_"):
         target_id_str = data.split("_", 1)[1]
         force_reply_markup = json.dumps({"force_reply": True})
         prompt_message = f"💬 请直接回复此消息来回复用户 {target_id_str}：\n\n用户ID: {target_id_str}"
-        
+
         result = send_message(ADMIN_ID, prompt_message, reply_markup=force_reply_markup)
         if result["status"] == "success":
             result_data = result.get("result", {}).get("result", {})
@@ -811,22 +799,23 @@ def handle_callback_query(callback_query):
         else:
             error_description = result.get('description', '未知错误')
             error_msg = f"❌ 发送回复提示失败：{error_description}"
-            logging.error(f"发送回复提示失败：chat_id={ADMIN_ID}, error={result.get('error')}, description={error_description}")
+            logging.error(
+                f"发送回复提示失败：chat_id={ADMIN_ID}, error={result.get('error')}, description={error_description}")
             send_message(ADMIN_ID, error_msg)
             answer_callback_query(query_id, text=error_msg, show_alert=True)
-        
+
     elif data.startswith("block_"):
         target_id_str = data.split("_", 1)[1]
         force_reply_markup = json.dumps({
             "force_reply": True,
             "input_field_placeholder": "请输入拉黑原因..."
         })
-        
+
         try:
-            msg = send_message(ADMIN_ID, 
-                             f"🚫 请输入拉黑用户 {target_id_str} 的原因：", 
-                             reply_markup=force_reply_markup)
-            
+            msg = send_message(ADMIN_ID,
+                               f"🚫 请输入拉黑用户 {target_id_str} 的原因：",
+                               reply_markup=force_reply_markup)
+
             if not msg or "message_id" not in msg.get("result", {}):
                 print(f"发送拉黑原因提示失败: {msg}")
                 answer_callback_query(query_id, text="❌ 发送请求失败，请稍后再试", show_alert=True)
@@ -835,7 +824,7 @@ def handle_callback_query(callback_query):
             print(f"发送拉黑原因提示异常: {e}")
             answer_callback_query(query_id, text="❌ 系统错误，请稍后再试", show_alert=True)
             return
-        
+
         # 存储待处理的拉黑操作
         data = load_data()
         data.setdefault("pending_actions", {})
@@ -846,8 +835,9 @@ def handle_callback_query(callback_query):
             "original_chat_id": chat_id
         }
         save_data(data)
-        
+
         answer_callback_query(query_id)
+
 
 # --- 命令菜单设置 ---
 
@@ -861,6 +851,7 @@ def set_user_commands():
         "commands": commands,
         "scope": {"type": "default"}
     })
+
 
 def set_admin_commands():
     commands = [
@@ -877,10 +868,12 @@ def set_admin_commands():
         "scope": {"type": "chat", "chat_id": ADMIN_ID}
     })
 
+
 # --- 健康检查 ---
 @app.route("/", methods=["GET"])
 def index():
     return "Bot is running!", 200
+
 
 # --- 启动 ---
 if __name__ == '__main__':
