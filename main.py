@@ -375,6 +375,19 @@ def handle_admin_message(message):
                     print(f"更新原始消息失败: {e}")
                     
                 return
+
+            elif action["type"] == "reply":
+                target_id = action["target_id"]
+                reply_text = text.strip()
+                if not reply_text:
+                    send_message(ADMIN_ID, "❌ 回复内容不能为空！")
+                    return
+                # 真正转发给用户
+                send_message(int(target_id), f"📨 管理员回复：\n\n{reply_text}")
+                send_message(ADMIN_ID, f"✅ 已成功回复用户 {target_id}")
+                update_stats("admin_reply")
+            return
+
     
     # 检查是否是待处理的操作
     if str(message_id) in data.get("pending_actions", {}):
