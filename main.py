@@ -227,7 +227,8 @@ def set_admin_commands():
         {"command": "broadcast", "description": "广播消息"},
         {"command": "block", "description": "拉黑用户"},
         {"command": "unblock", "description": "解除拉黑"},
-        {"command": "help", "description": "查看帮助信息"}
+        {"command": "help", "description": "查看帮助信息"},
+        {"command": "blacklist", "description": "查看黑名单列表"}
     ]
     requests.post(f"{BOT_URL}/setMyCommands", json={
         "commands": commands,
