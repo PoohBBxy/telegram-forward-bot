@@ -229,6 +229,34 @@ def handle_user_message(message):
 
     data = load_data()
 
+    # 检查用户是在做申诉回复
+    reply_to = message.get("reply_to_message")
+    if reply_to and reply_to.get("text","").startswith("ℹ️ 请填写你的申诉理由"):
+        user_id = str(message["from"]["id"])
+        appeal_reason = message.get("text", "").strip()
+        if not appeal_reason:
+            send_message(message["from"]["id"], "❌ 申诉理由不能为空！")
+            return
+        # 取出原 拉黑理由
+        data = load_data()
+        block_reason = data["blacklist"].get(user_id, "未知原因")
+        # 发给管理员
+        kb = {"inline_keyboard": [[
+            {"text":"解除拉黑","callback_data":f"admin_unblock_{user_id}"},
+            {"text":"拒绝申诉","callback_data":f"deny_appeal_{user_id}"}
+        ]]}
+        send_message(ADMIN_ID,
+                     f"📢 用户 {user_id} 申请申诉：\n"
+                     f"— 原拉黑原因：{block_reason}\n"
+                     f"— 申诉理由：{appeal_reason}",
+                     reply_markup=json.dumps(kb))
+        send_message(message["from"]["id"], "✅ 你的申诉已提交，请耐心等待。")
+        # 清理 pending_actions
+        d = load_data()
+        d.get("pending_actions", {}).pop(f"appeal_{user_id}", None)
+        save_data(d)
+        return
+    
     # 检查用户是否在黑名单中
     if str(user_id) in data["blacklist"]:
         reason = data["blacklist"][str(user_id)]
@@ -255,23 +283,23 @@ def handle_user_message(message):
     elif text == "/help":
         help_text = """📖 使用帮助：
 
-1. 直接输入文字即可留言
-2. 管理员会通过本机器人回复你
-3. 输入 /start 重新显示欢迎信息
-4. 输入 /help 显示此帮助信息
-5. 输入 /about 了解更多关于我们的信息
-
-尝试输入一些关键词触发隐藏功能哦！"""
+                    1. 直接输入文字即可留言
+                    2. 管理员会通过本机器人回复你
+                    3. 输入 /start 重新显示欢迎信息
+                    4. 输入 /help 显示此帮助信息
+                    5. 输入 /about 了解更多关于我们的信息
+                    
+                    尝试输入一些关键词触发隐藏功能哦！"""
         send_message(user_id, help_text)
     elif text == "/about":
         about_text = """🤖 关于本机器人：
 
-这是一个智能客服机器人，由管理员团队维护。
-我们致力于提供优质的服务，如有任何问题或建议，请随时留言。
-
-版本: v2.0.0
-更新日期: 2025年7月
-"""
+        这是一个智能客服机器人，由管理员团队维护。
+        我们致力于提供优质的服务，如有任何问题或建议，请随时留言。
+        
+        版本: v2.0.0
+        更新日期: 2025年7月
+        """
         send_message(user_id, about_text)
     else:
         # 检查彩蛋关键词
@@ -357,8 +385,15 @@ def handle_admin_message(message):
                     update_stats("blacklist")
                     send_message(ADMIN_ID, f"✅ 用户 {target_id} 已被拉黑。\n原因: {reason}")
                     try:
+                        # 构造申诉按钮
+                        appeal_kb = {
+                            "inline_keyboard": [
+                                [{"text": "我要申诉！", "callback_data": f"appeal_{target_id}"}]
+                            ]
+                        }
                         send_message(int(target_id),
-                                     f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}")
+                                     f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}",
+                                     reply_markup=json.dumps(appeal_kb))
                     except Exception as e:
                         logging.warning(f"通知用户 {target_id} 拉黑失败：{e}")
                 else:
@@ -406,8 +441,15 @@ def handle_admin_message(message):
                 update_stats("blacklist")
                 send_message(ADMIN_ID, f"✅ 用户 {target_id} 已被拉黑。\n原因: {reason}")
                 try:
+                    # 构造申诉按钮
+                    appeal_kb = {
+                        "inline_keyboard": [
+                            [{"text": "我要申诉！", "callback_data": f"appeal_{target_id}"}]
+                        ]
+                    }
                     send_message(int(target_id),
-                                 f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}")
+                                 f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}",
+                                 reply_markup=json.dumps(appeal_kb))
                 except Exception as e:
                     logging.warning(f"向 {target_id} 发送拉黑通知失败：{e}")
             else:
@@ -495,6 +537,13 @@ def handle_admin_message(message):
                 save_data(data)
                 update_stats("blacklist")
                 send_message(ADMIN_ID, f"✅ 用户 {user_id_to_unblock} 已从黑名单移除。")
+                # 同步通知用户
+                try:
+                    send_message(int(user_id_to_unblock),
+                                 "✅ 你已被管理员解除拉黑，现在可以继续使用机器人啦！")
+                except Exception:
+                    logging.warning(f"通知用户 {user_id_to_unblock} 解除拉黑失败")
+
             else:
                 send_message(ADMIN_ID, f"ℹ️ 用户 {user_id_to_unblock} 不在黑名单中。")
 
@@ -549,13 +598,13 @@ def handle_admin_message(message):
         elif command == "/help":
             help_text = """👨‍💻 管理员帮助菜单:
 
-/broadcast <消息> - 广播消息给所有用户
-/block <用户ID> <原因> - 拉黑用户
-/unblock <用户ID> - 解除拉黑
-/blacklist - 查看黑名单列表
-/stats - 查看机器人统计信息
-/egg - 彩蛋关键词管理
-/help - 显示此帮助信息"""
+                        /broadcast <消息> - 广播消息给所有用户
+                        /block <用户ID> <原因> - 拉黑用户
+                        /unblock <用户ID> - 解除拉黑
+                        /blacklist - 查看黑名单列表
+                        /stats - 查看机器人统计信息
+                        /egg - 彩蛋关键词管理
+                        /help - 显示此帮助信息"""
             send_message(ADMIN_ID, help_text)
 
 
@@ -836,6 +885,49 @@ def handle_callback_query(callback_query):
         }
         save_data(data)
         answer_callback_query(query_id)
+
+    elif data.startswith("appeal_"):
+        user_to_appeal = data.split("_",1)[1]
+        # 仅允许被黑名单中的用户申诉
+        if user_to_appeal in load_data().get("blacklist", {}):
+            # 让用户填写申诉理由
+            fr = json.dumps({"force_reply": True, "input_field_placeholder": "请输入申诉理由…"})
+            send_message(int(user_to_appeal),
+                         "ℹ️ 请填写你的申诉理由，我们会尽快处理。",
+                         reply_markup=fr)
+            # 存 pending appeal，待用户回复
+            d = load_data()
+            d.setdefault("pending_actions", {})
+            d["pending_actions"][f"appeal_{user_to_appeal}"] = {
+                "type": "appeal",
+                "user_id": user_to_appeal
+            }
+            save_data(d)
+            answer_callback_query(query_id)
+        else:
+            answer_callback_query(query_id, text="ℹ️ 你当前不在黑名单中，无需申诉。", show_alert=True)
+        return
+
+    elif data.startswith("admin_unblock_"):
+        uid = data.split("_",2)[2]
+        # 解除拉黑并通知双方
+        d = load_data()
+        if uid in d["blacklist"]:
+            del d["blacklist"][uid]
+            save_data(d); update_stats("blacklist")
+            send_message(ADMIN_ID, f"✅ 已解除用户 {uid} 的黑名单。")
+            send_message(int(uid), "✅ 管理员已同意你的申诉，已解除拉黑。")
+        else:
+            send_message(ADMIN_ID, f"ℹ️ 用户 {uid} 不在黑名单中。")
+        answer_callback_query(query_id)
+        return
+    
+    elif data.startswith("deny_appeal_"):
+        uid = data.split("_",2)[2]
+        send_message(ADMIN_ID, f"℮ 已拒绝用户 {uid} 的申诉。")
+        send_message(int(uid), "❌ 很抱歉，管理员已拒绝你的申诉，仍维持黑名单状态。")
+        answer_callback_query(query_id)
+        return
 
 
 # --- 命令菜单设置 ---
