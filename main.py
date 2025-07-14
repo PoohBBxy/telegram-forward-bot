@@ -314,13 +314,13 @@ def handle_user_message(message):
     elif text == "/help":
         help_text = """📖 使用帮助：
 
-                    1. 直接输入文字即可留言
-                    2. 管理员会通过本机器人回复你
-                    3. 输入 /start 重新显示欢迎信息
-                    4. 输入 /help 显示此帮助信息
-                    5. 输入 /about 了解更多关于我们的信息
-                    
-                    尝试输入一些关键词触发隐藏功能哦！"""
+1. 直接输入文字即可留言
+2. 管理员会通过本机器人回复你
+3. 输入 /start 重新显示欢迎信息
+4. 输入 /help 显示此帮助信息
+5. 输入 /about 了解更多关于我们的信息
+
+尝试输入一些关键词触发隐藏功能哦！"""
         send_message(user_id, help_text)
     elif text == "/about":
         about_text = """🤖 关于本机器人：
@@ -641,14 +641,32 @@ def handle_admin_message(message):
         elif command == "/help":
             help_text = """👨‍💻 管理员帮助菜单:
 
-                        /broadcast <消息> - 广播消息给所有用户
-                        /block <用户ID> <原因> - 拉黑用户
-                        /unblock <用户ID> - 解除拉黑
-                        /blacklist - 查看黑名单列表
-                        /stats - 查看机器人统计信息
-                        /egg - 彩蛋关键词管理
-                        /help - 显示此帮助信息"""
+            /broadcast <消息> - 广播消息给所有用户
+            /block <用户ID> <原因> - 拉黑用户
+            /unblock <用户ID> - 解除拉黑
+            /blacklist - 查看黑名单列表
+            /stats - 查看机器人统计信息
+            /egg - 彩蛋关键词管理
+            /help - 显示此帮助信息"""
             send_message(ADMIN_ID, help_text)
+
+    if action["type"] == "block_other":
+        uid = action["target_id"]
+        reason = text.strip()
+        if not reason:
+            send_message(ADMIN_ID, "❌ 原因不能为空！"); return
+        d = load_data()
+        d["blacklist"][uid] = reason
+        save_data(d); update_stats("blacklist")
+        send_message(ADMIN_ID, f"✅ 用户 {uid} 已被拉黑，原因：{reason}")
+        send_message(int(uid), f"🚫 你已被拉黑，原因：{reason}")
+        # 更新原键盘
+        requests.post(f"{BOT_URL}/editMessageText", json={
+            "chat_id": reply_to["chat"]["id"],
+            "message_id": reply_to["message_id"],
+            "text": f"[已处理] 用户 {uid} 被拉黑 ({reason})",
+            "reply_markup": json.dumps({"inline_keyboard":[]})
+        })
 
 
 # --- 按钮操作处理 ---
@@ -929,37 +947,52 @@ def handle_callback_query(callback_query):
             answer_callback_query(query_id, text=error_msg, show_alert=True)
 
     elif data.startswith("block_"):
-        target_id_str = data.split("_", 1)[1]
-        force_reply_markup = json.dumps({
-            "force_reply": True,
-            "input_field_placeholder": "请输入拉黑原因..."
-        })
-
-        result = send_message(ADMIN_ID,
-                               f"🚫 请输入拉黑用户 {target_id_str} 的原因：",
-                               reply_markup=force_reply_markup)
-        # 如果失败直接提示
-        if result.get("status") != "success":
-            answer_callback_query(query_id, text="❌ 发送请求失败，请稍后再试", show_alert=True)
-            return
-        # 深层提取到真正的 Telegram message_id
-        sent = result["result"].get("result", {})
-        prompt_msg_id = sent.get("message_id")
-        if not prompt_msg_id:
-            answer_callback_query(query_id, text="❌ 未能获取提示消息 ID，请重试", show_alert=True)
-            return
- 
-        # 存储待处理的拉黑操作
-        data = load_data()
-        data.setdefault("pending_actions", {})
-        data["pending_actions"][str(prompt_msg_id)] = {
-            "type": "block",
-            "target_id": target_id_str,
-            "original_message_id": message_id,
-            "original_chat_id": chat_id
-        }
-        save_data(data)
+        target_id = data.split("_",1)[1]
+        reasons = ["spam", "违规语言", "恶意刷屏", "其他…"]
+        kb = {"inline_keyboard":[
+            [{"text": r, "callback_data": f"blockreason_{target_id}|{r}"}]
+            for r in reasons
+        ]}
+        send_message(ADMIN_ID,
+            f"🚫 请选择拉黑原因，用户 {target_id}：",
+            reply_markup=json.dumps(kb)
+        )
         answer_callback_query(query_id)
+        return
+
+    elif data.startswith("blockreason_"):
+        payload = data.split("_",1)[1]  # "12345|其他…"
+        uid, reason = payload.split("|",1)
+        if reason == "其他…":
+            # ForceReply 写具体原因
+            fr = json.dumps({
+                "force_reply": True,
+                "input_field_placeholder": "请输入其他拉黑原因"
+            })
+            send_message(ADMIN_ID, "✍️ 请输入具体拉黑原因：", reply_markup=fr)
+            # 存 pending_actions 标记
+            d = load_data()
+            d.setdefault("pending_actions", {})[str(message_id)] = {
+                "type":"block_other","target_id":uid
+            }
+            save_data(d)
+        else:
+            # 直接拉黑
+            d = load_data()
+            d["blacklist"][uid] = reason
+            save_data(d); update_stats("blacklist")
+            send_message(ADMIN_ID, f"✅ 用户 {uid} 已被拉黑，原因：{reason}")
+            send_message(int(uid), f"🚫 你已被拉黑，原因：{reason}")
+            # 更新原按钮
+            requests.post(f"{BOT_URL}/editMessageText", json={
+                "chat_id": chat_id,"message_id":message_id,
+                "text":f"[已处理] 用户 {uid} 被拉黑 ({reason})",
+                "reply_markup":json.dumps({"inline_keyboard":[]})
+            })
+        answer_callback_query(query_id)
+        return
+
+
 
     elif data.startswith("admin_unblock_"):
         uid = data.split("_",2)[2]
