@@ -910,7 +910,7 @@ def handle_callback_query(callback_query):
 
     elif data.startswith("admin_unblock_"):
         uid = data.split("_",2)[2]
-        # 解除拉黑并通知双方
+        # 1) 解除黑名单
         d = load_data()
         if uid in d["blacklist"]:
             del d["blacklist"][uid]
@@ -919,16 +919,29 @@ def handle_callback_query(callback_query):
             send_message(int(uid), "✅ 管理员已同意你的申诉，已解除拉黑。")
         else:
             send_message(ADMIN_ID, f"ℹ️ 用户 {uid} 不在黑名单中。")
+        # 2) 更新原按钮消息为“已处理”
+        requests.post(f"{BOT_URL}/editMessageText", json={
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": "[已处理] 已同意解除拉黑",
+            "reply_markup": json.dumps({"inline_keyboard": []})
+        })
         answer_callback_query(query_id)
         return
     
     elif data.startswith("deny_appeal_"):
         uid = data.split("_",2)[2]
-        send_message(ADMIN_ID, f"℮ 已拒绝用户 {uid} 的申诉。")
-        send_message(int(uid), "❌ 很抱歉，管理员已拒绝你的申诉，仍维持黑名单状态。")
+        send_message(ADMIN_ID, f"❌ 已拒绝用户 {uid} 的申诉。")
+        send_message(int(uid), "❌ 管理员已拒绝你的申诉，仍维持黑名单状态。")
+        # 更新原按钮消息为“已处理”
+        requests.post(f"{BOT_URL}/editMessageText", json={
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": "[已处理] 已拒绝申诉",
+            "reply_markup": json.dumps({"inline_keyboard": []})
+        })
         answer_callback_query(query_id)
         return
-
 
 # --- 命令菜单设置 ---
 
