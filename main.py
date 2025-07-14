@@ -3,7 +3,7 @@ from flask import Flask, request
 import requests
 import json
 from config import TOKEN, ADMIN_ID
-imoort os
+import os
 
 app = Flask(__name__)
 BOT_URL = f"https://api.telegram.org/bot{TOKEN}"
