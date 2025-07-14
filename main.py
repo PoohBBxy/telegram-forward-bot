@@ -82,7 +82,7 @@ def send_message(chat_id, text, reply_markup=None):
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "HTML"  # 支持HTML格式
+        "parse_mode": "HTML"
     }
     
     if reply_markup:
@@ -95,20 +95,22 @@ def send_message(chat_id, text, reply_markup=None):
             timeout=15
         )
         response.raise_for_status()
-        return response.json()
+        return {"status": "success", "result": response.json()}
     except requests.exceptions.RequestException as e:
         logging.error(f"发送消息到 {chat_id} 失败: {str(e)}")
-        # 尝试获取更多错误信息
         try:
             if hasattr(e, 'response') and e.response:
                 error_details = e.response.json()
-                logging.error(f"Telegram API 错误: {error_details.get('description', '未知错误')}")
-                # 特定错误处理
-                if "bot was blocked" in error_details.get('description', '').lower():
-                    return {"error": "user_blocked"}
+                error_description = error_details.get('description', '未知错误')
+                logging.error(f"Telegram API 错误: {error_description}")
+                if "bot was blocked" in error_description.lower():
+                    return {"status": "error", "error": "user_blocked", "description": error_description}
+                elif "chat not found" in error_description.lower():
+                    return {"status": "error", "error": "chat_not_found", "description": error_description}
+                return {"status": "error", "error": "api_error", "description": error_description}
         except:
             logging.error("无法解析错误响应")
-    return None
+        return {"status": "error", "error": "unknown", "description": str(e)}
 
 def answer_callback_query(callback_query_id, text=None, show_alert=False):
     payload = {"callback_query_id": callback_query_id}
@@ -275,27 +277,34 @@ def handle_admin_message(message):
     # 处理管理员回复用户消息的情况
     reply_to_message = message.get("reply_to_message")
     if reply_to_message and reply_to_message.get("from", {}).get("id") == ADMIN_ID:
-        # 检查回复的消息是否是机器人发送的
         if "text" in reply_to_message:
             text_content = reply_to_message["text"]
-            
-            # 检查是否是快捷回复提示消息
             if "💬 请直接回复此消息来回复用户" in text_content:
-                # 提取目标用户ID
                 match = re.search(r"用户 (\d+)", text_content)
-                if match:
-                    target_id = match.group(1)
-                    # 转发消息给用户
-                    if text.strip():
-                        # 在消息前面加上提示
-                        reply_text = f"📨 管理员回复：\n\n{text}"
-                        send_message(int(target_id), reply_text)
-                        send_message(ADMIN_ID, f"✅ 回复已发送给用户 {target_id}。")
-                        # 更新统计
-                        update_stats("admin_reply")
-                    else:
-                        send_message(ADMIN_ID, "❌ 回复内容不能为空！")
+                if not match:
+                    send_message(ADMIN_ID, "❌ 无法解析目标用户ID，请检查消息格式！")
                     return
+                target_id = match.group(1)
+                if not text.strip():
+                    send_message(ADMIN_ID, "❌ 回复内容不能为空！")
+                    return
+                
+                # 发送回复给用户
+                reply_text = f"📨 管理员回复：\n\n{text}"
+                result = send_message(int(target_id), reply_text)
+                
+                if result["status"] == "success":
+                    send_message(ADMIN_ID, f"✅ 回复已成功发送给用户 {target_id}。")
+                    update_stats("admin_reply")
+                else:
+                    error_msg = {
+                        "user_blocked": f"❌ 无法发送消息给用户 {target_id}：用户已拉黑机器人。",
+                        "chat_not_found": f"❌ 无法发送消息给用户 {target_id}：用户不存在或未启动机器人。",
+                        "api_error": f"❌ 发送消息失败：{result['description']}",
+                        "unknown": f"❌ 未知错误：{result['description']}"
+                    }.get(result["error"], f"❌ 发送消息失败：{result['description']}")
+                    send_message(ADMIN_ID, error_msg)
+                return
 
     # 检查是否是回复消息
     reply_to_message = message.get("reply_to_message")
@@ -752,38 +761,24 @@ def handle_callback_query(callback_query):
     elif data.startswith("reply_"):
         target_id_str = data.split("_", 1)[1]
         force_reply_markup = json.dumps({"force_reply": True})
-        
-        # 使用更清晰的消息格式，便于后续识别
         prompt_message = f"💬 请直接回复此消息来回复用户 {target_id_str}：\n\n用户ID: {target_id_str}"
         
-        # 添加重试机制
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                msg = send_message(ADMIN_ID, prompt_message, reply_markup=force_reply_markup)
-                
-                if msg and "result" in msg and "message_id" in msg["result"]:
-                    # 存储待处理的回复操作
-                    data = load_data()
-                    data.setdefault("pending_actions", {})
-                    data["pending_actions"][str(msg["result"]["message_id"])] = {
-                        "type": "reply",
-                        "target_id": target_id_str,
-                        "original_message_id": message_id,
-                        "original_chat_id": chat_id
-                    }
-                    save_data(data)
-                    answer_callback_query(query_id)
-                    return
-                else:
-                    logging.warning(f"发送回复提示失败 (尝试 {attempt+1}/{max_retries})")
-            except Exception as e:
-                logging.error(f"发送回复提示异常 (尝试 {attempt+1}/{max_retries}): {str(e)}")
-            
-            time.sleep(1)  # 等待1秒后重试
-        
-        # 所有尝试都失败
-        answer_callback_query(query_id, text="❌ 操作失败，请稍后再试", show_alert=True)
+        result = send_message(ADMIN_ID, prompt_message, reply_markup=force_reply_markup)
+        if result["status"] == "success" and "result" in result and "message_id" in result["result"]:
+            data = load_data()
+            data.setdefault("pending_actions", {})
+            data["pending_actions"][str(result["result"]["message_id"])] = {
+                "type": "reply",
+                "target_id": target_id_str,
+                "original_message_id": message_id,
+                "original_chat_id": chat_id
+            }
+            save_data(data)
+            logging.info(f"存储待处理回复操作：message_id={result['result']['message_id']}, target_id={target_id_str}")
+            answer_callback_query(query_id)
+        else:
+            logging.error(f"发送回复提示失败：{result.get('description', '未知错误')}")
+            answer_callback_query(query_id, text="❌ 操作失败，请稍后再试", show_alert=True)
         
     elif data.startswith("block_"):
         target_id_str = data.split("_", 1)[1]
