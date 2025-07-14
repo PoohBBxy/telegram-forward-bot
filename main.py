@@ -244,6 +244,11 @@ def handle_user_message(message):
     user_id = message["from"]["id"]
     username = message["from"].get("username", "匿名用户")
     text = message.get("text", "")
+    if text == "联系客服":
+        send_message(ADMIN_ID, f"👤 用户 {user_id} 请求人工客服")
+        rmkb = json.dumps({"remove_keyboard": True})
+        send_message(user_id,"✅ 已收到您的人工客服请求，请稍候，客服人员将尽快联系您。",reply_markup=rmkb)
+        return
 
     data = load_data()
 
@@ -298,6 +303,14 @@ def handle_user_message(message):
     # 处理命令和关键词
     if text == "/start":
         send_message(user_id, WELCOME_MSG)
+        kb = {
+            "keyboard": [[{"text": "联系客服"}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": False
+        }
+        send_message(user_id, "如需人工服务，请点击下方“联系客服”按钮", reply_markup=json.dumps(kb))
+        return
+
     elif text == "/help":
         help_text = """📖 使用帮助：
 
@@ -344,6 +357,12 @@ def handle_user_message(message):
             ]
         }
         send_message(ADMIN_ID, forward_text, reply_markup=json.dumps(keyboard))
+        human_kb = {
+            "inline_keyboard": [
+                [{"text": "转人工客服", "callback_data": "to_human"}]
+            ]
+        }
+        send_message(user_id,"🤖 如果需要人工客服，请点击下方按钮。",reply_markup=json.dumps(human_kb))
 
 
 # --- 管理员消息处理 ---
@@ -639,6 +658,17 @@ def handle_callback_query(callback_query):
     message_id = callback_query["message"]["message_id"]
     chat_id = callback_query["message"]["chat"]["id"]
     data = callback_query["data"]
+
+    if data == "to_human":
+        send_message(ADMIN_ID, f"👤 用户 {from_user_id} 点击“转人工客服”")
+        send_message(from_user_id,"✅ 您已请求人工客服，请稍后，客服人员将尽快联系您。")
+        requests.post(f"{BOT_URL}/editMessageReplyMarkup", json={
+            "chat_id": chat_id,
+            "message_id": message_id,
+            reply_markup": json.dumps({"inline_keyboard": []})
+        })
+        answer_callback_query(query_id)
+        return
 
     if data.startswith("appeal_"):
         user_to_appeal = data.split("_",1)[1]
