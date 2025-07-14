@@ -456,7 +456,7 @@ def handle_callback_query(callback_query):
                 [{"text": "管理奖品", "callback_data": "egg_prize"}],
                 [{"text": "返回", "callback_data": "back_main"}]
             ]
-        }
+        ]
         requests.post(f"{BOT_URL}/editMessageText", json={
             "chat_id": chat_id,
             "message_id": message_id,
@@ -495,7 +495,10 @@ def handle_callback_query(callback_query):
                 "force_reply": True,
                 "input_field_placeholder": "格式: 关键词1,关键词2|回复内容"
             })
-            send_message(ADMIN_ID, "请输入彩蛋信息 (格式: 关键词1,关键词2|回复内容):", reply_markup=force_reply_markup)
+            msg = send_message(ADMIN_ID, "请输入彩蛋信息 (格式: 关键词1,关键词2|回复内容):", reply_markup=force_reply_markup)
+            if not msg or "message_id" not in msg:
+                answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
+                return
             answer_callback_query(query_id)
 
         elif subcommand == "list":
@@ -544,12 +547,15 @@ def handle_callback_query(callback_query):
                 "force_reply": True,
                 "input_field_placeholder": "输入序号删除"
             })
-            send_message(ADMIN_ID, text, reply_markup=force_reply_markup)
-            
+            msg = send_message(ADMIN_ID, text, reply_markup=force_reply_markup)
+            if not msg or "message_id" not in msg:
+                answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
+                return
+                
             # 存储待处理的删除操作
             data = load_data()
             data.setdefault("pending_actions", {})
-            data["pending_actions"][str(message_id + 1)] = {
+            data["pending_actions"][str(msg["message_id"])] = {
                 "type": "egg_delete",
                 "original_message_id": message_id,
                 "original_chat_id": chat_id
@@ -581,7 +587,10 @@ def handle_callback_query(callback_query):
                 "force_reply": True,
                 "input_field_placeholder": "输入奖品名称"
             })
-            send_message(ADMIN_ID, "请输入要添加的奖品名称:", reply_markup=force_reply_markup)
+            msg = send_message(ADMIN_ID, "请输入要添加的奖品名称:", reply_markup=force_reply_markup)
+            if not msg or "message_id" not in msg:
+                answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
+                return
             answer_callback_query(query_id)
 
         elif subcommand == "prize_list":
@@ -621,12 +630,15 @@ def handle_callback_query(callback_query):
                 "force_reply": True,
                 "input_field_placeholder": "输入序号删除"
             })
-            send_message(ADMIN_ID, text, reply_markup=force_reply_markup)
-            
+            msg = send_message(ADMIN_ID, text, reply_markup=force_reply_markup)
+            if not msg or "message_id" not in msg:
+                answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
+                return
+                
             # 存储待处理的删除操作
             data = load_data()
             data.setdefault("pending_actions", {})
-            data["pending_actions"][str(message_id + 1)] = {
+            data["pending_actions"][str(msg["message_id"])] = {
                 "type": "prize_delete",
                 "original_message_id": message_id,
                 "original_chat_id": chat_id
@@ -638,7 +650,10 @@ def handle_callback_query(callback_query):
     elif data.startswith("reply_"):
         target_id_str = data.split("_", 1)[1]
         force_reply_markup = json.dumps({"force_reply": True})
-        send_message(ADMIN_ID, f"💬 请直接回复此消息来回复用户 {target_id_str}：", reply_markup=force_reply_markup)
+        msg = send_message(ADMIN_ID, f"💬 请直接回复此消息来回复用户 {target_id_str}：", reply_markup=force_reply_markup)
+        if not msg or "message_id" not in msg:
+            answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
+            return
         answer_callback_query(query_id)
 
     elif data.startswith("block_"):
@@ -651,6 +666,10 @@ def handle_callback_query(callback_query):
                           f"🚫 请输入拉黑用户 {target_id_str} 的原因：", 
                           reply_markup=force_reply_markup)
         
+        if not msg or "message_id" not in msg:
+            answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
+            return
+            
         # 存储待处理的拉黑操作
         data = load_data()
         data.setdefault("pending_actions", {})
