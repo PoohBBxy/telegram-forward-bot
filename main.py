@@ -418,7 +418,7 @@ def handle_admin_message(message):
                     [{"text": "管理奖品", "callback_data": "egg_prize"}],
                     [{"text": "返回", "callback_data": "back"}]
                 ]
-            ]
+            }
             send_message(ADMIN_ID, "🥚 彩蛋管理菜单:", reply_markup=json.dumps(keyboard))
 
         elif command == "/help":
