@@ -6,11 +6,12 @@ import os
 import re
 import time
 import random
+from datetime import datetime
 
 app = Flask(__name__)
 BOT_URL = f"https://api.telegram.org/bot{TOKEN}"
 DB_FILE = "database.json"
-KEYWORD_FILE = "keywords.json"  # 词库文件
+KEYWORD_FILE = "keywords.json"
 WELCOME_MSG = """👋 欢迎使用智能客服机器人！
 
 我是您的在线助手，有问题请随时留言。
@@ -60,7 +61,6 @@ def load_keywords():
         with open(KEYWORD_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        # 返回默认词库
         return {
             "eggs": [
                 {"keywords": ["彩蛋", "惊喜", "秘密"], "reply": "🎉 恭喜你发现隐藏彩蛋！🎁\n你获得了一次虚拟抽奖机会：\n\n🎲 正在抽奖...\n\n✨ 恭喜获得：{prize}"},
@@ -123,7 +123,6 @@ def process_egg_keywords(text):
     
     for egg in eggs:
         for keyword in egg["keywords"]:
-            # 简单的关键词匹配，可以根据需要调整为正则匹配
             if keyword.lower() in text.lower():
                 reply = egg["reply"]
                 
@@ -132,6 +131,14 @@ def process_egg_keywords(text):
                     prizes = keywords_data["prizes"]
                     prize = random.choice(prizes)
                     reply = reply.format(prize=prize)
+                
+                elif "{time}" in reply:
+                    current_time = datetime.now().strftime("%H:%M:%S")
+                    reply = reply.replace("{time}", current_time)
+                
+                elif "{date}" in reply:
+                    current_date = datetime.now().strftime("%Y年%m月%d日")
+                    reply = reply.replace("{date}", current_date)
                 
                 # 更新统计
                 update_stats("egg_hit")
@@ -287,7 +294,8 @@ def handle_admin_message(message):
                     requests.post(f"{BOT_URL}/editMessageText", json={
                         "chat_id": original_chat_id,
                         "message_id": original_message_id,
-                        "text": new_text
+                        "text": new_text,
+                        "reply_markup": json.dumps({"inline_keyboard": []})
                     })
             except Exception as e:
                 print(f"更新原始消息失败: {e}")
@@ -401,132 +409,29 @@ def handle_admin_message(message):
             send_message(ADMIN_ID, message)
 
         elif command == "/egg":
-            subcommand = args.split()[0] if args else ""
-            
-            if subcommand == "add":
-                # 添加新彩蛋
-                try:
-                    parts = args.split(" ", 2)
-                    keywords_str = parts[1]
-                    reply = parts[2]
-                    
-                    keywords = [k.strip() for k in keywords_str.split(",")]
-                    
-                    if not keywords or not reply:
-                        send_message(ADMIN_ID, "❌ 格式错误，应为 /egg add <关键词1,关键词2> <回复内容>")
-                        return
-                        
-                    keywords_data = load_keywords()
-                    eggs = keywords_data.get("eggs", [])
-                    
-                    eggs.append({
-                        "keywords": keywords,
-                        "reply": reply
-                    })
-                    
-                    save_keywords(keywords_data)
-                    send_message(ADMIN_ID, f"✅ 新彩蛋已添加！\n关键词: {', '.join(keywords)}\n回复: {reply}")
-                    
-                except Exception as e:
-                    send_message(ADMIN_ID, f"❌ 添加彩蛋失败: {str(e)}\n格式应为 /egg add <关键词1,关键词2> <回复内容>")
-                    
-            elif subcommand == "list":
-                # 列出所有彩蛋
-                keywords_data = load_keywords()
-                eggs = keywords_data.get("eggs", [])
-                
-                if not eggs:
-                    send_message(ADMIN_ID, "📭 当前没有设置任何彩蛋关键词。")
-                    return
-                    
-                lines = []
-                for i, egg in enumerate(eggs, 1):
-                    keywords = ", ".join(egg["keywords"])
-                    reply = egg["reply"][:50] + ("..." if len(egg["reply"]) > 50 else "")
-                    lines.append(f"{i}. 关键词: {keywords}\n   回复: {reply}")
-                    
-                send_message(ADMIN_ID, "🥚 彩蛋关键词列表:\n\n" + "\n\n".join(lines))
-                
-            elif subcommand == "delete":
-                # 删除彩蛋
-                try:
-                    index = int(args.split()[1]) - 1
-                    
-                    keywords_data = load_keywords()
-                    eggs = keywords_data.get("eggs", [])
-                    
-                    if 0 <= index < len(eggs):
-                        deleted = eggs.pop(index)
-                        save_keywords(keywords_data)
-                        send_message(ADMIN_ID, f"✅ 已删除彩蛋: {', '.join(deleted['keywords'])}")
-                    else:
-                        send_message(ADMIN_ID, "❌ 索引不存在，请使用 /egg list 查看可用索引。")
-                        
-                except (ValueError, IndexError):
-                    send_message(ADMIN_ID, "❌ 格式错误，应为 /egg delete <序号>")
-                    
-            elif subcommand == "prize":
-                # 管理奖品
-                prize_subcmd = args.split()[1] if len(args.split()) > 1 else ""
-                
-                if prize_subcmd == "add":
-                    prize = args.split(" ", 2)[2]
-                    
-                    if not prize:
-                        send_message(ADMIN_ID, "❌ 格式错误，应为 /egg prize add <奖品名称>")
-                        return
-                        
-                    keywords_data = load_keywords()
-                    prizes = keywords_data.setdefault("prizes", [])
-                    
-                    if prize not in prizes:
-                        prizes.append(prize)
-                        save_keywords(keywords_data)
-                        send_message(ADMIN_ID, f"✅ 新奖品已添加: {prize}")
-                    else:
-                        send_message(ADMIN_ID, f"❌ 奖品已存在: {prize}")
-                        
-                elif prize_subcmd == "list":
-                    keywords_data = load_keywords()
-                    prizes = keywords_data.get("prizes", [])
-                    
-                    if not prizes:
-                        send_message(ADMIN_ID, "📭 当前没有设置任何奖品。")
-                        return
-                        
-                    lines = [f"{i}. {prize}" for i, prize in enumerate(prizes, 1)]
-                    send_message(ADMIN_ID, "🎁 奖品列表:\n\n" + "\n".join(lines))
-                    
-                elif prize_subcmd == "delete":
-                    try:
-                        index = int(args.split()[2]) - 1
-                        
-                        keywords_data = load_keywords()
-                        prizes = keywords_data.get("prizes", [])
-                        
-                        if 0 <= index < len(prizes):
-                            deleted = prizes.pop(index)
-                            save_keywords(keywords_data)
-                            send_message(ADMIN_ID, f"✅ 已删除奖品: {deleted}")
-                        else:
-                            send_message(ADMIN_ID, "❌ 索引不存在，请使用 /egg prize list 查看可用索引。")
-                            
-                    except (ValueError, IndexError):
-                        send_message(ADMIN_ID, "❌ 格式错误，应为 /egg prize delete <序号>")
-                        
-                else:
-                    send_message(ADMIN_ID, "❌ 未知子命令。可用子命令: add, list, delete")
-                    
-            else:
-                help_text = """🥚 彩蛋管理命令:
+            # 显示菜单
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "添加彩蛋", "callback_data": "egg_add"}],
+                    [{"text": "查看彩蛋列表", "callback_data": "egg_list"}],
+                    [{"text": "删除彩蛋", "callback_data": "egg_delete"}],
+                    [{"text": "管理奖品", "callback_data": "egg_prize"}],
+                    [{"text": "返回", "callback_data": "back"}]
+                ]
+            ]
+            send_message(ADMIN_ID, "🥚 彩蛋管理菜单:", reply_markup=json.dumps(keyboard))
 
-/egg add <关键词1,关键词2> <回复内容> - 添加新彩蛋
-/egg list - 列出所有彩蛋
-/egg delete <序号> - 删除指定彩蛋
-/egg prize add <奖品名称> - 添加抽奖奖品
-/egg prize list - 列出所有奖品
-/egg prize delete <序号> - 删除指定奖品"""
-                send_message(ADMIN_ID, help_text)
+        elif command == "/help":
+            help_text = """👨‍💻 管理员帮助菜单:
+
+/broadcast <消息> - 广播消息给所有用户
+/block <用户ID> <原因> - 拉黑用户
+/unblock <用户ID> - 解除拉黑
+/blacklist - 查看黑名单列表
+/stats - 查看机器人统计信息
+/egg - 彩蛋关键词管理
+/help - 显示此帮助信息"""
+            send_message(ADMIN_ID, help_text)
 
 # --- 按钮操作处理 ---
 
@@ -535,21 +440,209 @@ def handle_callback_query(callback_query):
     from_user_id = callback_query["from"]["id"]
     message_id = callback_query["message"]["message_id"]
     chat_id = callback_query["message"]["chat"]["id"]
+    data = callback_query["data"]
 
     if from_user_id != ADMIN_ID:
         answer_callback_query(query_id, text="❌ 你没有权限操作。")
         return
 
-    data = callback_query["data"]
-    action, target_id_str = data.split("_", 1)
+    if data == "back":
+        # 返回主菜单
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "添加彩蛋", "callback_data": "egg_add"}],
+                [{"text": "查看彩蛋列表", "callback_data": "egg_list"}],
+                [{"text": "删除彩蛋", "callback_data": "egg_delete"}],
+                [{"text": "管理奖品", "callback_data": "egg_prize"}],
+                [{"text": "返回", "callback_data": "back_main"}]
+            ]
+        ]
+        requests.post(f"{BOT_URL}/editMessageText", json={
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": "🥚 彩蛋管理菜单:",
+            "reply_markup": json.dumps(keyboard)
+        })
+        answer_callback_query(query_id)
+        return
 
-    if action == "reply":
+    elif data == "back_main":
+        # 返回管理员主菜单
+        help_text = """👨‍💻 管理员帮助菜单:
+
+/broadcast <消息> - 广播消息给所有用户
+/block <用户ID> <原因> - 拉黑用户
+/unblock <用户ID> - 解除拉黑
+/blacklist - 查看黑名单列表
+/stats - 查看机器人统计信息
+/egg - 彩蛋关键词管理
+/help - 显示此帮助信息"""
+        requests.post(f"{BOT_URL}/editMessageText", json={
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": help_text,
+            "reply_markup": json.dumps({"inline_keyboard": []})
+        })
+        answer_callback_query(query_id)
+        return
+
+    elif data.startswith("egg_"):
+        subcommand = data.split("_")[1]
+        keywords_data = load_keywords()
+
+        if subcommand == "add":
+            force_reply_markup = json.dumps({
+                "force_reply": True,
+                "input_field_placeholder": "格式: 关键词1,关键词2|回复内容"
+            })
+            send_message(ADMIN_ID, "请输入彩蛋信息 (格式: 关键词1,关键词2|回复内容):", reply_markup=force_reply_markup)
+            answer_callback_query(query_id)
+
+        elif subcommand == "list":
+            eggs = keywords_data.get("eggs", [])
+            
+            if not eggs:
+                send_message(ADMIN_ID, "📭 当前没有设置任何彩蛋关键词。")
+                answer_callback_query(query_id)
+                return
+                
+            lines = []
+            for i, egg in enumerate(eggs, 1):
+                keywords = ", ".join(egg["keywords"])
+                reply = egg["reply"][:50] + ("..." if len(egg["reply"]) > 50 else "")
+                lines.append(f"{i}. 关键词: {keywords}\n   回复: {reply}")
+                
+            text = "🥚 彩蛋关键词列表:\n\n" + "\n\n".join(lines)
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "返回", "callback_data": "back"}]
+                ]
+            }
+            requests.post(f"{BOT_URL}/editMessageText", json={
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text,
+                "reply_markup": json.dumps(keyboard)
+            })
+            answer_callback_query(query_id)
+
+        elif subcommand == "delete":
+            eggs = keywords_data.get("eggs", [])
+            
+            if not eggs:
+                send_message(ADMIN_ID, "📭 当前没有设置任何彩蛋关键词。")
+                answer_callback_query(query_id)
+                return
+                
+            lines = []
+            for i, egg in enumerate(eggs, 1):
+                keywords = ", ".join(egg["keywords"])
+                lines.append(f"{i}. {keywords}")
+                
+            text = "请选择要删除的彩蛋:\n\n" + "\n".join(lines)
+            force_reply_markup = json.dumps({
+                "force_reply": True,
+                "input_field_placeholder": "输入序号删除"
+            })
+            send_message(ADMIN_ID, text, reply_markup=force_reply_markup)
+            
+            # 存储待处理的删除操作
+            data = load_data()
+            data.setdefault("pending_actions", {})
+            data["pending_actions"][str(message_id + 1)] = {
+                "type": "egg_delete",
+                "original_message_id": message_id,
+                "original_chat_id": chat_id
+            }
+            save_data(data)
+            
+            answer_callback_query(query_id)
+
+        elif subcommand == "prize":
+            # 奖品管理子菜单
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "添加奖品", "callback_data": "egg_prize_add"}],
+                    [{"text": "查看奖品列表", "callback_data": "egg_prize_list"}],
+                    [{"text": "删除奖品", "callback_data": "egg_prize_delete"}],
+                    [{"text": "返回", "callback_data": "back"}]
+                ]
+            ]
+            requests.post(f"{BOT_URL}/editMessageText", json={
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": "🎁 奖品管理菜单:",
+                "reply_markup": json.dumps(keyboard)
+            })
+            answer_callback_query(query_id)
+
+        elif subcommand == "prize_add":
+            force_reply_markup = json.dumps({
+                "force_reply": True,
+                "input_field_placeholder": "输入奖品名称"
+            })
+            send_message(ADMIN_ID, "请输入要添加的奖品名称:", reply_markup=force_reply_markup)
+            answer_callback_query(query_id)
+
+        elif subcommand == "prize_list":
+            prizes = keywords_data.get("prizes", [])
+            
+            if not prizes:
+                send_message(ADMIN_ID, "📭 当前没有设置任何奖品。")
+                answer_callback_query(query_id)
+                return
+                
+            lines = [f"{i}. {prize}" for i, prize in enumerate(prizes, 1)]
+            text = "🎁 奖品列表:\n\n" + "\n".join(lines)
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "返回", "callback_data": "egg_prize"}]
+                ]
+            }
+            requests.post(f"{BOT_URL}/editMessageText", json={
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text,
+                "reply_markup": json.dumps(keyboard)
+            })
+            answer_callback_query(query_id)
+
+        elif subcommand == "prize_delete":
+            prizes = keywords_data.get("prizes", [])
+            
+            if not prizes:
+                send_message(ADMIN_ID, "📭 当前没有设置任何奖品。")
+                answer_callback_query(query_id)
+                return
+                
+            lines = [f"{i}. {prize}" for i, prize in enumerate(prizes, 1)]
+            text = "请选择要删除的奖品:\n\n" + "\n".join(lines)
+            force_reply_markup = json.dumps({
+                "force_reply": True,
+                "input_field_placeholder": "输入序号删除"
+            })
+            send_message(ADMIN_ID, text, reply_markup=force_reply_markup)
+            
+            # 存储待处理的删除操作
+            data = load_data()
+            data.setdefault("pending_actions", {})
+            data["pending_actions"][str(message_id + 1)] = {
+                "type": "prize_delete",
+                "original_message_id": message_id,
+                "original_chat_id": chat_id
+            }
+            save_data(data)
+            
+            answer_callback_query(query_id)
+
+    elif data.startswith("reply_"):
+        target_id_str = data.split("_", 1)[1]
         force_reply_markup = json.dumps({"force_reply": True})
         send_message(ADMIN_ID, f"💬 请直接回复此消息来回复用户 {target_id_str}：", reply_markup=force_reply_markup)
         answer_callback_query(query_id)
 
-    elif action == "block":
-        # 先确认拉黑原因
+    elif data.startswith("block_"):
+        target_id_str = data.split("_", 1)[1]
         force_reply_markup = json.dumps({
             "force_reply": True,
             "input_field_placeholder": "请输入拉黑原因..."
