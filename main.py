@@ -617,6 +617,28 @@ def handle_callback_query(callback_query):
     chat_id = callback_query["message"]["chat"]["id"]
     data = callback_query["data"]
 
+    if data.startswith("appeal_"):
+        user_to_appeal = data.split("_",1)[1]
+        # 仅允许被黑名单中的用户申诉
+        if user_to_appeal in load_data().get("blacklist", {}):
+            # 让用户填写申诉理由
+            fr = json.dumps({"force_reply": True, "input_field_placeholder": "请输入申诉理由…"})
+            send_message(int(user_to_appeal),
+                         "ℹ️ 请填写你的申诉理由，我们会尽快处理。",
+                         reply_markup=fr)
+            # 存 pending appeal，待用户回复
+            d = load_data()
+            d.setdefault("pending_actions", {})
+            d["pending_actions"][f"appeal_{user_to_appeal}"] = {
+                "type": "appeal",
+                "user_id": user_to_appeal
+            }
+            save_data(d)
+            answer_callback_query(query_id)
+        else:
+            answer_callback_query(query_id, text="ℹ️ 你当前不在黑名单中，无需申诉。", show_alert=True)
+        return
+    
     if from_user_id != ADMIN_ID:
         answer_callback_query(query_id, text="❌ 你没有权限操作。")
         return
@@ -885,28 +907,6 @@ def handle_callback_query(callback_query):
         }
         save_data(data)
         answer_callback_query(query_id)
-
-    elif data.startswith("appeal_"):
-        user_to_appeal = data.split("_",1)[1]
-        # 仅允许被黑名单中的用户申诉
-        if user_to_appeal in load_data().get("blacklist", {}):
-            # 让用户填写申诉理由
-            fr = json.dumps({"force_reply": True, "input_field_placeholder": "请输入申诉理由…"})
-            send_message(int(user_to_appeal),
-                         "ℹ️ 请填写你的申诉理由，我们会尽快处理。",
-                         reply_markup=fr)
-            # 存 pending appeal，待用户回复
-            d = load_data()
-            d.setdefault("pending_actions", {})
-            d["pending_actions"][f"appeal_{user_to_appeal}"] = {
-                "type": "appeal",
-                "user_id": user_to_appeal
-            }
-            save_data(d)
-            answer_callback_query(query_id)
-        else:
-            answer_callback_query(query_id, text="ℹ️ 你当前不在黑名单中，无需申诉。", show_alert=True)
-        return
 
     elif data.startswith("admin_unblock_"):
         uid = data.split("_",2)[2]
