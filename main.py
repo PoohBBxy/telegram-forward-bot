@@ -7,6 +7,8 @@ import re
 import time
 import random
 from datetime import datetime
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
 BOT_URL = f"https://api.telegram.org/bot{TOKEN}"
@@ -81,12 +83,18 @@ def send_message(chat_id, text, reply_markup=None):
     if reply_markup:
         payload["reply_markup"] = reply_markup
     try:
-        response = requests.post(f"{BOT_URL}/sendMessage", json=payload)
+        response = requests.post(f"{BOT_URL}/sendMessage", json=payload, timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f"发送消息到 {chat_id} 失败: {e}，响应内容: {response.text if 'response' in locals() else '无'}")
-        return None
+        logging.error(f"发送消息到 {chat_id} 失败: {str(e)}")
+        # 尝试获取更多错误信息
+        try:
+            error_details = response.json() if 'response' in locals() else {}
+            logging.error(f"Telegram API 错误: {error_details.get('description', '未知错误')}")
+        except:
+            logging.error("无法解析错误响应")
+    return None
 
 def answer_callback_query(callback_query_id, text=None, show_alert=False):
     payload = {"callback_query_id": callback_query_id}
