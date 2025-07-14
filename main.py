@@ -665,7 +665,7 @@ def handle_callback_query(callback_query):
         requests.post(f"{BOT_URL}/editMessageReplyMarkup", json={
             "chat_id": chat_id,
             "message_id": message_id,
-            reply_markup": json.dumps({"inline_keyboard": []})
+            "reply_markup": json.dumps({"inline_keyboard": []})
         })
         answer_callback_query(query_id)
         return
