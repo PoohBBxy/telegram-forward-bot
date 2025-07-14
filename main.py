@@ -792,18 +792,22 @@ def handle_callback_query(callback_query):
         prompt_message = f"💬 请直接回复此消息来回复用户 {target_id_str}：\n\n用户ID: {target_id_str}"
         
         result = send_message(ADMIN_ID, prompt_message, reply_markup=force_reply_markup)
-        if result["status"] == "success" and "result" in result and "message_id" in result["result"]:
-            data = load_data()
-            data.setdefault("pending_actions", {})
-            data["pending_actions"][str(result["result"]["message_id"])] = {
-                "type": "reply",
-                "target_id": target_id_str,
-                "original_message_id": message_id,
-                "original_chat_id": chat_id
-            }
-            save_data(data)
-            logging.info(f"存储待处理回复操作：message_id={result['result']['message_id']}, target_id={target_id_str}")
-            answer_callback_query(query_id)
+        if result["status"] == "success":
+            result_data = result.get("result", {}).get("result", {})
+            message_id_sent = result_data.get("message_id")
+            if message_id_sent:
+                data = load_data()
+                data.setdefault("pending_actions", {})
+                data["pending_actions"][str(message_id_sent)] = {
+                    "type": "reply",
+                    "target_id": target_id_str,
+                    "original_message_id": message_id,
+                    "original_chat_id": chat_id
+                }
+                save_data(data)
+                logging.info(f"✅ 存储待处理回复操作：message_id={message_id_sent}, target_id={target_id_str}")
+                answer_callback_query(query_id)
+                return
         else:
             error_description = result.get('description', '未知错误')
             error_msg = f"❌ 发送回复提示失败：{error_description}"
