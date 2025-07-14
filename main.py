@@ -78,7 +78,7 @@ def save_keywords(data):
 
 # --- 消息发送/响应函数 ---
 
-def send_message(chat_id, text, reply_markup=None):
+def send_message(chat_id, text, reply_markup=None, retries=5, delay=2):
     payload = {
         "chat_id": chat_id,
         "text": text,
@@ -88,29 +88,44 @@ def send_message(chat_id, text, reply_markup=None):
     if reply_markup:
         payload["reply_markup"] = reply_markup
     
-    try:
-        response = requests.post(
-            f"{BOT_URL}/sendMessage",
-            json=payload,
-            timeout=15
-        )
-        response.raise_for_status()
-        return {"status": "success", "result": response.json()}
-    except requests.exceptions.RequestException as e:
-        logging.error(f"发送消息到 {chat_id} 失败: {str(e)}")
+    logging.info(f"尝试发送消息到用户 {chat_id}: {text[:50]}...")
+    for attempt in range(retries):
         try:
-            if hasattr(e, 'response') and e.response:
-                error_details = e.response.json()
-                error_description = error_details.get('description', '未知错误')
-                logging.error(f"Telegram API 错误: {error_description}")
-                if "bot was blocked" in error_description.lower():
-                    return {"status": "error", "error": "user_blocked", "description": error_description}
-                elif "chat not found" in error_description.lower():
-                    return {"status": "error", "error": "chat_not_found", "description": error_description}
-                return {"status": "error", "error": "api_error", "description": error_description}
-        except:
-            logging.error("无法解析错误响应")
-        return {"status": "error", "error": "unknown", "description": str(e)}
+            response = requests.post(
+                f"{BOT_URL}/sendMessage",
+                json=payload,
+                timeout=15
+            )
+            response.raise_for_status()
+            logging.info(f"消息成功发送到用户 {chat_id}")
+            return {"status": "success", "result": response.json()}
+        except requests.exceptions.RequestException as e:
+            error_msg = f"发送消息到 {chat_id} 失败 (尝试 {attempt+1}/{retries}): {str(e)}"
+            logging.error(error_msg)
+            try:
+                if hasattr(e, 'response') and e.response:
+                    error_details = e.response.json()
+                    error_description = error_details.get('description', '未知 Telegram API 错误')
+                    logging.error(f"Telegram API 错误: {error_description}")
+                    if "bot was blocked" in error_description.lower():
+                        return {"status": "error", "error": "user_blocked", "description": error_description}
+                    elif "chat not found" in error_description.lower():
+                        return {"status": "error", "error": "chat_not_found", "description": error_description}
+                    elif "too many requests" in error_description.lower():
+                        time.sleep(delay * (2 ** attempt))
+                        continue
+                    return {"status": "error", "error": "api_error", "description": error_description}
+                else:
+                    error_description = f"无响应内容: {str(e)}"
+                    return {"status": "error", "error": "no_response", "description": error_description}
+            except Exception as parse_error:
+                error_description = f"无法解析 Telegram API 响应: {str(parse_error)}"
+                logging.error(error_description)
+                return {"status": "error", "error": "parse_error", "description": error_description}
+        time.sleep(delay * (2 ** attempt))
+    error_description = f"发送消息到 {chat_id} 失败：达到最大重试次数"
+    logging.error(error_description)
+    return {"status": "error", "error": "max_retries_exceeded", "description": error_description}
 
 def answer_callback_query(callback_query_id, text=None, show_alert=False):
     payload = {"callback_query_id": callback_query_id}
@@ -777,8 +792,11 @@ def handle_callback_query(callback_query):
             logging.info(f"存储待处理回复操作：message_id={result['result']['message_id']}, target_id={target_id_str}")
             answer_callback_query(query_id)
         else:
-            logging.error(f"发送回复提示失败：{result.get('description', '未知错误')}")
-            answer_callback_query(query_id, text="❌ 操作失败，请稍后再试", show_alert=True)
+            error_description = result.get('description', '未知错误')
+            error_msg = f"❌ 发送回复提示失败：{error_description}"
+            logging.error(f"发送回复提示失败：chat_id={ADMIN_ID}, error={result.get('error')}, description={error_description}")
+            send_message(ADMIN_ID, error_msg)
+            answer_callback_query(query_id, text=error_msg, show_alert=True)
         
     elif data.startswith("block_"):
         target_id_str = data.split("_", 1)[1]
