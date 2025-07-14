@@ -167,6 +167,18 @@ def handle_admin_message(message):
             else:
                 send_message(ADMIN_ID, f"ℹ️ 用户 {user_id_to_unblock} 不在黑名单中。")
 
+        elif command == "/blacklist":
+            data = load_data()
+            blacklist = data.get("blacklist", [])
+            if not blacklist:
+                send_message(ADMIN_ID, "📭 当前黑名单为空。")
+            else:
+                lines = []
+                for uid in blacklist:
+                    username = data["users"].get(uid, {}).get("username", "（无用户名）")
+                    lines.append(f"- {uid} @{username}")
+                send_message(ADMIN_ID, "🚫 黑名单列表：\n" + "\n".join(lines))
+
 # --- 按钮操作处理 ---
 
 def handle_callback_query(callback_query):
@@ -191,6 +203,10 @@ def handle_callback_query(callback_query):
             db_data["blacklist"].append(target_id_str)
             save_data(db_data)
             answer_callback_query(query_id, text=f"✅ 用户 {target_id_str} 已被拉黑")
+            try:
+                send_message(int(target_id_str), "🚫 你已被管理员加入黑名单，无法再继续使用本机器人。")
+            except Exception as e:
+                print(f"向 {target_id_str} 发送拉黑通知失败：{e}")
         else:
             answer_callback_query(query_id, text=f"ℹ️ 用户 {target_id_str} 已在黑名单中")
 
