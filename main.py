@@ -713,13 +713,23 @@ def handle_callback_query(callback_query):
     elif data.startswith("reply_"):
         target_id_str = data.split("_", 1)[1]
         force_reply_markup = json.dumps({"force_reply": True})
-        msg = send_message(ADMIN_ID, f"💬 请直接回复此消息来回复用户 {target_id_str}：", reply_markup=force_reply_markup)
-        if not msg or "message_id" not in msg:
-            answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
-            return
-        answer_callback_query(query_id)
-
-    # 修改后的 handle_callback_query 函数中的 block 处理部分
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                msg = send_message(ADMIN_ID, f"💬 请直接回复此消息来回复用户 {target_id_str}：", reply_markup=force_reply_markup)
+                if msg and "result" in msg and "message_id" in msg["result"]:
+                    answer_callback_query(query_id)
+                    return
+                else:
+                    logging.warning(f"发送回复提示失败 (尝试 {attempt+1}/{max_retries}): {msg}")
+            except Exception as e:
+                logging.error(f"发送回复提示异常 (尝试 {attempt+1}/{max_retries}): {e}")
+            
+            time.sleep(1)  # 等待1秒后重试
+        
+        # 所有尝试都失败
+        answer_callback_query(query_id, text="❌ 操作失败，请稍后再试", show_alert=True)
+        
     elif data.startswith("block_"):
         target_id_str = data.split("_", 1)[1]
         force_reply_markup = json.dumps({
@@ -727,7 +737,6 @@ def handle_callback_query(callback_query):
             "input_field_placeholder": "请输入拉黑原因..."
         })
         
-        # 修复：添加更健壮的错误处理
         try:
             msg = send_message(ADMIN_ID, 
                              f"🚫 请输入拉黑用户 {target_id_str} 的原因：", 
