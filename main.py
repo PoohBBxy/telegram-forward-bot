@@ -811,32 +811,31 @@ def handle_callback_query(callback_query):
             "input_field_placeholder": "请输入拉黑原因..."
         })
 
-        try:
-            msg = send_message(ADMIN_ID,
+        result = send_message(ADMIN_ID,
                                f"🚫 请输入拉黑用户 {target_id_str} 的原因：",
                                reply_markup=force_reply_markup)
-
-            if not msg or "message_id" not in msg.get("result", {}):
-                print(f"发送拉黑原因提示失败: {msg}")
-                answer_callback_query(query_id, text="❌ 发送请求失败，请稍后再试", show_alert=True)
-                return
-        except Exception as e:
-            print(f"发送拉黑原因提示异常: {e}")
-            answer_callback_query(query_id, text="❌ 系统错误，请稍后再试", show_alert=True)
-            return
-
-        # 存储待处理的拉黑操作
-        data = load_data()
-        data.setdefault("pending_actions", {})
-        data["pending_actions"][str(msg["result"]["message_id"])] = {
-            "type": "block",
-            "target_id": target_id_str,
-            "original_message_id": message_id,
-            "original_chat_id": chat_id
-        }
-        save_data(data)
-
-        answer_callback_query(query_id)
+         # 如果失败直接提示
+         if result.get("status") != "success":
+             answer_callback_query(query_id, text="❌ 发送请求失败，请稍后再试", show_alert=True)
+             return
+         # 深层提取到真正的 Telegram message_id
+         sent = result["result"].get("result", {})
+         prompt_msg_id = sent.get("message_id")
+         if not prompt_msg_id:
+             answer_callback_query(query_id, text="❌ 未能获取提示消息 ID，请重试", show_alert=True)
+             return
+ 
+         # 存储待处理的拉黑操作
+         data = load_data()
+         data.setdefault("pending_actions", {})
+         data["pending_actions"][str(prompt_msg_id)] = {
+             "type": "block",
+             "target_id": target_id_str,
+             "original_message_id": message_id,
+             "original_chat_id": chat_id
+         }
+         save_data(data)
+         answer_callback_query(query_id)
 
 
 # --- 命令菜单设置 ---
