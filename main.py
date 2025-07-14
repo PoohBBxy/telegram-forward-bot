@@ -248,7 +248,9 @@ def handle_admin_message(message):
     message_id = message["message_id"]
     user_id = message["from"]["id"]
 
-    # 新增：检查是否是回复消息
+    data = load_data()
+
+    # 检查是否是回复消息
     reply_to_message = message.get("reply_to_message")
     if reply_to_message:
         reply_to_msg_id = reply_to_message["message_id"]
