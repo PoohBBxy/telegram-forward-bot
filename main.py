@@ -439,6 +439,36 @@ def handle_admin_message(message):
                                      reply_markup=json.dumps(appeal_kb))
                     except Exception as e:
                         logging.warning(f"通知用户 {target_id} 拉黑失败：{e}")
+
+                elif action["type"] == "reply":
+                    reply_text = text
+                    if not reply_text:
+                        send_message(ADMIN_ID, "❌ 回复内容不能为空！")
+                        return
+    
+                    send_message(int(target_id), f"📨 管理员回复：\n\n{reply_text}")
+                    send_message(ADMIN_ID, f"✅ 已成功回复用户 {target_id}")
+                    update_stats("admin_reply")
+                    return
+
+                if action["type"] == "block_other":
+                    uid = action["target_id"]
+                    reason = text.strip()
+                    if not reason:
+                        send_message(ADMIN_ID, "❌ 原因不能为空！"); return
+                    d = load_data()
+                    d["blacklist"][uid] = reason
+                    save_data(d); update_stats("blacklist")
+                    send_message(ADMIN_ID, f"✅ 用户 {uid} 已被拉黑，原因：{reason}")
+                    send_message(int(uid), f"🚫 你已被拉黑，原因：{reason}")
+                    # 更新原键盘
+                    requests.post(f"{BOT_URL}/editMessageText", json={
+                        "chat_id": reply_to["chat"]["id"],
+                        "message_id": reply_to["message_id"],
+                        "text": f"[已处理] 用户 {uid} 被拉黑 ({reason})",
+                        "reply_markup": json.dumps({"inline_keyboard":[]})
+                    })
+    
                 else:
                     current_reason = data["blacklist"][target_id]
                     send_message(ADMIN_ID, f"ℹ️ 用户 {target_id} 已在黑名单中。\n原因: {current_reason}")
@@ -454,16 +484,7 @@ def handle_admin_message(message):
                 except Exception as e:
                     logging.warning(f"更新原始拉黑按钮消息失败：{e}")
 
-            elif action["type"] == "reply":
-                reply_text = text
-                if not reply_text:
-                    send_message(ADMIN_ID, "❌ 回复内容不能为空！")
-                    return
-
-                send_message(int(target_id), f"📨 管理员回复：\n\n{reply_text}")
-                send_message(ADMIN_ID, f"✅ 已成功回复用户 {target_id}")
-                update_stats("admin_reply")
-            return
+            
 
     # 情况 3：最后兜底，直接 message_id 命中 pending_actions 的情况（极少出现）
     if message_id in data.get("pending_actions", {}):
@@ -650,23 +671,6 @@ def handle_admin_message(message):
             /help - 显示此帮助信息"""
             send_message(ADMIN_ID, help_text)
 
-    if action["type"] == "block_other":
-        uid = action["target_id"]
-        reason = text.strip()
-        if not reason:
-            send_message(ADMIN_ID, "❌ 原因不能为空！"); return
-        d = load_data()
-        d["blacklist"][uid] = reason
-        save_data(d); update_stats("blacklist")
-        send_message(ADMIN_ID, f"✅ 用户 {uid} 已被拉黑，原因：{reason}")
-        send_message(int(uid), f"🚫 你已被拉黑，原因：{reason}")
-        # 更新原键盘
-        requests.post(f"{BOT_URL}/editMessageText", json={
-            "chat_id": reply_to["chat"]["id"],
-            "message_id": reply_to["message_id"],
-            "text": f"[已处理] 用户 {uid} 被拉黑 ({reason})",
-            "reply_markup": json.dumps({"inline_keyboard":[]})
-        })
 
 
 # --- 按钮操作处理 ---
