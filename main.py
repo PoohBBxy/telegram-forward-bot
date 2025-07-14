@@ -8,6 +8,9 @@ import time
 import random
 from datetime import datetime
 import logging
+import jieba
+from rapidfuzz import fuzz
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -24,7 +27,6 @@ WELCOME_MSG = """👋 欢迎使用智能客服机器人！
 
 
 # --- 数据管理 ---
-
 def load_data():
     try:
         with open(DB_FILE, "r") as f:
@@ -61,7 +63,6 @@ def save_data(data):
 
 
 # --- 词库管理 ---
-
 def load_keywords():
     try:
         with open(KEYWORD_FILE, "r", encoding="utf-8") as f:
@@ -82,9 +83,30 @@ def save_keywords(data):
     with open(KEYWORD_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
+def semantic_match(text):
+    """
+    对未命中的文本，按意图里的每个关键词做模糊匹配，返回得分最高且超过阈值的 egg.reply，否则返回 None。
+    """
+    keywords_data = load_keywords()
+    best_score = 0
+    best_reply = None
+
+    # 分词，有助于长句拆分
+    tokens = list(jieba.cut_for_search(text))
+    joined = " ".join(tokens).lower()
+
+    for egg in keywords_data.get("eggs", []):
+        for kw in egg["keywords"]:
+            # 用 partial_ratio 对拼接后的句子和单个关键词做局部匹配
+            score = fuzz.partial_ratio(joined, kw.lower())
+            if score > best_score:
+                best_score, best_reply = score, egg["reply"]
+
+    # 阈值75～85之间
+    return best_reply if best_score >= 80 else None
+
 
 # --- 消息发送/响应函数 ---
-
 def send_message(chat_id, text, reply_markup=None, retries=5, delay=2):
     payload = {
         "chat_id": chat_id,
@@ -145,7 +167,6 @@ def answer_callback_query(callback_query_id, text=None, show_alert=False):
 
 
 # --- 统计功能 ---
-
 def update_stats(message_type="user_message", increment=1):
     data = load_data()
     stats = data["stats"]
@@ -165,7 +186,6 @@ def update_stats(message_type="user_message", increment=1):
 
 
 # --- 彩蛋系统 ---
-
 def process_egg_keywords(text):
     keywords_data = load_keywords()
     eggs = keywords_data.get("eggs", [])
@@ -198,7 +218,6 @@ def process_egg_keywords(text):
 
 
 # --- Webhook 路由 ---
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -221,7 +240,6 @@ def webhook():
 
 
 # --- 用户消息处理 ---
-
 def handle_user_message(message):
     user_id = message["from"]["id"]
     username = message["from"].get("username", "匿名用户")
@@ -308,6 +326,13 @@ def handle_user_message(message):
             send_message(user_id, egg_reply)
             return
 
+        sem_reply = semantic_match(text)
+        if sem_reply:
+            send_message(user_id, sem_reply)
+            update_stats("egg_hit")
+            return
+
+
         # 转发消息给管理员
         forward_text = f"👤 用户 @{username} (ID:{user_id}) 发来消息：\n\n{text}"
         keyboard = {
@@ -322,7 +347,6 @@ def handle_user_message(message):
 
 
 # --- 管理员消息处理 ---
-
 def handle_admin_message(message):
     text = message.get("text", "").strip()
     message_id = str(message["message_id"])
@@ -609,7 +633,6 @@ def handle_admin_message(message):
 
 
 # --- 按钮操作处理 ---
-
 def handle_callback_query(callback_query):
     query_id = callback_query["id"]
     from_user_id = callback_query["from"]["id"]
@@ -944,7 +967,6 @@ def handle_callback_query(callback_query):
         return
 
 # --- 命令菜单设置 ---
-
 def set_user_commands():
     commands = [
         {"command": "start", "description": "启动机器人"},
