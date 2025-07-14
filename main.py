@@ -85,7 +85,7 @@ def send_message(chat_id, text, reply_markup=None):
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f"发送消息到 {chat_id} 失败: {e}")
+        print(f"发送消息到 {chat_id} 失败: {e}，响应内容: {response.text if 'response' in locals() else '无'}")
         return None
 
 def answer_callback_query(callback_query_id, text=None, show_alert=False):
