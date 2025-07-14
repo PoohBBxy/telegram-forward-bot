@@ -79,19 +79,33 @@ def save_keywords(data):
 # --- 消息发送/响应函数 ---
 
 def send_message(chat_id, text, reply_markup=None):
-    payload = {"chat_id": chat_id, "text": text}
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML"  # 支持HTML格式
+    }
+    
     if reply_markup:
         payload["reply_markup"] = reply_markup
+    
     try:
-        response = requests.post(f"{BOT_URL}/sendMessage", json=payload, timeout=10)
+        response = requests.post(
+            f"{BOT_URL}/sendMessage",
+            json=payload,
+            timeout=15
+        )
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
         logging.error(f"发送消息到 {chat_id} 失败: {str(e)}")
         # 尝试获取更多错误信息
         try:
-            error_details = response.json() if 'response' in locals() else {}
-            logging.error(f"Telegram API 错误: {error_details.get('description', '未知错误')}")
+            if hasattr(e, 'response') and e.response:
+                error_details = e.response.json()
+                logging.error(f"Telegram API 错误: {error_details.get('description', '未知错误')}")
+                # 特定错误处理
+                if "bot was blocked" in error_details.get('description', '').lower():
+                    return {"error": "user_blocked"}
         except:
             logging.error("无法解析错误响应")
     return None
@@ -257,6 +271,31 @@ def handle_admin_message(message):
     user_id = message["from"]["id"]
 
     data = load_data()
+
+    # 处理管理员回复用户消息的情况
+    reply_to_message = message.get("reply_to_message")
+    if reply_to_message and reply_to_message.get("from", {}).get("id") == ADMIN_ID:
+        # 检查回复的消息是否是机器人发送的
+        if "text" in reply_to_message:
+            text_content = reply_to_message["text"]
+            
+            # 检查是否是快捷回复提示消息
+            if "💬 请直接回复此消息来回复用户" in text_content:
+                # 提取目标用户ID
+                match = re.search(r"用户 (\d+)", text_content)
+                if match:
+                    target_id = match.group(1)
+                    # 转发消息给用户
+                    if text.strip():
+                        # 在消息前面加上提示
+                        reply_text = f"📨 管理员回复：\n\n{text}"
+                        send_message(int(target_id), reply_text)
+                        send_message(ADMIN_ID, f"✅ 回复已发送给用户 {target_id}。")
+                        # 更新统计
+                        update_stats("admin_reply")
+                    else:
+                        send_message(ADMIN_ID, "❌ 回复内容不能为空！")
+                    return
 
     # 检查是否是回复消息
     reply_to_message = message.get("reply_to_message")
@@ -713,17 +752,33 @@ def handle_callback_query(callback_query):
     elif data.startswith("reply_"):
         target_id_str = data.split("_", 1)[1]
         force_reply_markup = json.dumps({"force_reply": True})
+        
+        # 使用更清晰的消息格式，便于后续识别
+        prompt_message = f"💬 请直接回复此消息来回复用户 {target_id_str}：\n\n用户ID: {target_id_str}"
+        
+        # 添加重试机制
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                msg = send_message(ADMIN_ID, f"💬 请直接回复此消息来回复用户 {target_id_str}：", reply_markup=force_reply_markup)
+                msg = send_message(ADMIN_ID, prompt_message, reply_markup=force_reply_markup)
+                
                 if msg and "result" in msg and "message_id" in msg["result"]:
+                    # 存储待处理的回复操作
+                    data = load_data()
+                    data.setdefault("pending_actions", {})
+                    data["pending_actions"][str(msg["result"]["message_id"])] = {
+                        "type": "reply",
+                        "target_id": target_id_str,
+                        "original_message_id": message_id,
+                        "original_chat_id": chat_id
+                    }
+                    save_data(data)
                     answer_callback_query(query_id)
                     return
                 else:
-                    logging.warning(f"发送回复提示失败 (尝试 {attempt+1}/{max_retries}): {msg}")
+                    logging.warning(f"发送回复提示失败 (尝试 {attempt+1}/{max_retries})")
             except Exception as e:
-                logging.error(f"发送回复提示异常 (尝试 {attempt+1}/{max_retries}): {e}")
+                logging.error(f"发送回复提示异常 (尝试 {attempt+1}/{max_retries}): {str(e)}")
             
             time.sleep(1)  # 等待1秒后重试
         
