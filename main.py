@@ -456,7 +456,7 @@ def handle_callback_query(callback_query):
                 [{"text": "管理奖品", "callback_data": "egg_prize"}],
                 [{"text": "返回", "callback_data": "back_main"}]
             ]
-        ]
+        }
         requests.post(f"{BOT_URL}/editMessageText", json={
             "chat_id": chat_id,
             "message_id": message_id,
@@ -567,7 +567,7 @@ def handle_callback_query(callback_query):
                     [{"text": "删除奖品", "callback_data": "egg_prize_delete"}],
                     [{"text": "返回", "callback_data": "back"}]
                 ]
-            ]
+            }
             requests.post(f"{BOT_URL}/editMessageText", json={
                 "chat_id": chat_id,
                 "message_id": message_id,
