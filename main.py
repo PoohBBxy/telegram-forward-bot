@@ -3,132 +3,231 @@ import requests
 import json
 from config import TOKEN, ADMIN_ID
 import os
-import re # 导入正则表达式模块
+import re
+import time
 
 app = Flask(__name__)
 BOT_URL = f"https://api.telegram.org/bot{TOKEN}"
 DB_FILE = "database.json"
 
-def load_users():
-    """从JSON文件加载用户数据"""
+# --- 数据管理 ---
+
+def load_data():
     try:
         with open(DB_FILE, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+            if isinstance(data, dict) and "users" not in data:
+                return {"users": data, "blacklist": []}
+            data.setdefault("users", {})
+            data.setdefault("blacklist", [])
+            return data
     except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        return {"users": {}, "blacklist": []}
 
-def save_users(users):
-    """将用户数据保存到JSON文件"""
+def save_data(data):
     with open(DB_FILE, "w") as f:
-        json.dump(users, f, indent=4)
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
-def send_message(chat_id, text, **kwargs):
-    """发送消息到指定的聊天ID"""
-    payload = {
-        "chat_id": chat_id,
-        "text": text
-    }
-    # 允许传入其他参数，如 reply_markup
-    payload.update(kwargs)
+# --- 消息发送/响应函数 ---
+
+def send_message(chat_id, text, reply_markup=None):
+    payload = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         response = requests.post(f"{BOT_URL}/sendMessage", json=payload)
-        response.raise_for_status() # 如果请求失败 (如 4xx or 5xx), 抛出异常
+        response.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"发送消息到 {chat_id} 失败: {e}")
 
+def answer_callback_query(callback_query_id, text=None):
+    payload = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+    requests.post(f"{BOT_URL}/answerCallbackQuery", json=payload)
+
+# --- Webhook 路由 ---
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-    if "message" not in data:
-        return "ok", 200
 
-    message = data["message"]
-    user_id = message["from"]["id"]
-    text = message.get("text", "")
-    username = message["from"].get("username", "匿名用户")
-
-    # --- 逻辑判断 ---
-
-    # 1. 判断消息是否来自管理员
-    if user_id == ADMIN_ID:
-        # --- 管理员专属逻辑区 ---
-
-        # 1.1 优先处理【快捷回复】功能
-        # 检查消息是否是对另一条消息的回复
-        if "reply_to_message" in message:
-            replied_text = message["reply_to_message"].get("text", "")
-            # 使用正则表达式从被回复的消息文本中提取原始用户ID
-            # 匹配格式: "(ID:12345678)"
-            match = re.search(r"\(ID:(\d+)\)", replied_text)
-            
-            if match:
-                target_id = int(match.group(1))
-                reply_msg = text  # 管理员的回复内容就是当前消息的文本
-                try:
-                    send_message(target_id, reply_msg)
-                    send_message(ADMIN_ID, f"✅ 已通过「快捷回复」发送给用户 {target_id}。")
-                except Exception as e:
-                    send_message(ADMIN_ID, f"❌ 发送失败: {e}")
-                return "ok", 200 # 处理完毕，直接返回
-            else:
-                # 如果管理员回复的不是机器人转发的用户消息，可以给个提示
-                send_message(ADMIN_ID, "🤔 无法识别回复对象。请直接回复由机器人转发的用户消息才能使用快捷回复。")
-
-        # 1.2 处理传统的【/reply 命令】(作为备用方案)
-        elif text.startswith("/reply"):
-            parts = text.split(" ", 2)
-            if len(parts) < 3:
-                send_message(ADMIN_ID, "❌ 格式错误，应为 /reply <用户ID> <内容>")
-            else:
-                target_id, reply_msg = parts[1], parts[2]
-                try:
-                    send_message(int(target_id), reply_msg)
-                    send_message(ADMIN_ID, "✅ 已通过「指令」发送回复。")
-                except ValueError:
-                    send_message(ADMIN_ID, "❌ 用户ID无效，必须是纯数字。")
-                except Exception as e:
-                    send_message(ADMIN_ID, f"❌ 发送失败: {e}")
-        
-        # 1.3 管理员发送的其他消息，机器人可以不作回应
-        # (或者你可以在这里添加其他管理员指令)
-
-    # 2. 如果消息来自普通用户
-    else:
-        # --- 普通用户专属逻辑区 ---
-        # 保存或更新用户信息
-        users = load_users()
-        users[str(user_id)] = username
-        save_users(users)
-
-        if text == "/start":
-            send_message(user_id, "你好！欢迎使用本机器人，有问题请留言，我会尽快回复你。")
-        elif text == "/help":
-            send_message(user_id, "直接输入文字即可留言；管理员会通过该机器人回复你。")
+    if "callback_query" in data:
+        handle_callback_query(data["callback_query"])
+    elif "message" in data:
+        message = data["message"]
+        user_id = message["from"]["id"]
+        if user_id == ADMIN_ID:
+            handle_admin_message(message)
         else:
-            # 转发用户消息给管理员，并附上用户信息以便快捷回复
-            forward_text = f"👤 用户 @{username} (ID:{user_id}) 发来消息：\n\n{text}"
-            send_message(ADMIN_ID, forward_text)
+            handle_user_message(message)
 
     return "ok", 200
 
+# --- 用户消息处理 ---
 
-# 这个 /reply 路由现在是可选的，因为主要逻辑都在 webhook 中
-# 但可以保留它用于其他可能的外部应用调用
-@app.route("/reply", methods=["POST"])
-def reply():
-    data = request.get_json()
-    target_id = data.get("user_id")
-    text = data.get("text")
-    if target_id and text:
-        send_message(target_id, text)
-        return "sent"
-    return "missing params", 400
+def handle_user_message(message):
+    user_id = message["from"]["id"]
+    username = message["from"].get("username", "匿名用户")
+    text = message.get("text", "")
 
+    data = load_data()
+
+    if str(user_id) in data["blacklist"]:
+        print(f"已屏蔽来自黑名单用户 {user_id} 的消息。")
+        return
+
+    data["users"][str(user_id)] = {"username": username}
+    save_data(data)
+
+    if text == "/start":
+        send_message(user_id, "你好！欢迎使用本机器人，有问题请留言，我会尽快回复你。")
+    elif text == "/help":
+        send_message(user_id, "直接输入文字即可留言；管理员会通过该机器人回复你。")
+    else:
+        forward_text = f"👤 用户 @{username} (ID:{user_id}) 发来消息：\n\n{text}"
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "快捷回复", "callback_data": f"reply_{user_id}"},
+                    {"text": "拉黑用户", "callback_data": f"block_{user_id}"}
+                ]
+            ]
+        }
+        send_message(ADMIN_ID, forward_text, reply_markup=json.dumps(keyboard))
+
+# --- 管理员消息处理 ---
+
+def handle_admin_message(message):
+    text = message.get("text", "")
+
+    if "reply_to_message" in message and "请直接回复此消息" in message["reply_to_message"].get("text", ""):
+        replied_text = message["reply_to_message"]["text"]
+        match = re.search(r"用户 (\d+)", replied_text)
+        if match:
+            target_id = int(match.group(1))
+            reply_msg = text
+            try:
+                send_message(target_id, reply_msg)
+                send_message(ADMIN_ID, f"✅ 已通过「快捷回复」发送给用户 {target_id}。")
+            except Exception as e:
+                send_message(ADMIN_ID, f"❌ 发送失败: {e}")
+        return
+
+    if text.startswith("/"):
+        parts = text.split(" ", 1)
+        command = parts[0]
+        args = parts[1] if len(parts) > 1 else ""
+
+        if command == "/broadcast":
+            if not args:
+                send_message(ADMIN_ID, "❌ 格式错误，应为 /broadcast <要广播的内容>")
+                return
+
+            data = load_data()
+            all_users = data["users"].keys()
+            blacklist = data["blacklist"]
+
+            count = 0
+            for user_id in all_users:
+                if user_id not in blacklist:
+                    try:
+                        send_message(user_id, args)
+                        count += 1
+                        time.sleep(0.1)
+                    except Exception as e:
+                        print(f"广播到 {user_id} 失败: {e}")
+            send_message(ADMIN_ID, f"✅ 广播完成，消息已发送给 {count} 位用户。")
+
+        elif command == "/block":
+            if not args or not args.isdigit():
+                send_message(ADMIN_ID, "❌ 格式错误，应为 /block <用户ID>")
+                return
+
+            user_id_to_block = args
+            data = load_data()
+            if user_id_to_block not in data["blacklist"]:
+                data["blacklist"].append(user_id_to_block)
+                save_data(data)
+                send_message(ADMIN_ID, f"✅ 用户 {user_id_to_block} 已被加入黑名单。")
+            else:
+                send_message(ADMIN_ID, f"ℹ️ 用户 {user_id_to_block} 已在黑名单中。")
+
+        elif command == "/unblock":
+            if not args or not args.isdigit():
+                send_message(ADMIN_ID, "❌ 格式错误，应为 /unblock <用户ID>")
+                return
+
+            user_id_to_unblock = args
+            data = load_data()
+            if user_id_to_unblock in data["blacklist"]:
+                data["blacklist"].remove(user_id_to_unblock)
+                save_data(data)
+                send_message(ADMIN_ID, f"✅ 用户 {user_id_to_unblock} 已从黑名单移除。")
+            else:
+                send_message(ADMIN_ID, f"ℹ️ 用户 {user_id_to_unblock} 不在黑名单中。")
+
+# --- 按钮操作处理 ---
+
+def handle_callback_query(callback_query):
+    query_id = callback_query["id"]
+    from_user_id = callback_query["from"]["id"]
+
+    if from_user_id != ADMIN_ID:
+        answer_callback_query(query_id, text="❌ 你没有权限操作。")
+        return
+
+    data = callback_query["data"]
+    action, target_id_str = data.split("_", 1)
+
+    if action == "reply":
+        force_reply_markup = json.dumps({"force_reply": True})
+        send_message(ADMIN_ID, f"💬 请直接回复此消息来回复用户 {target_id_str}：", reply_markup=force_reply_markup)
+        answer_callback_query(query_id)
+
+    elif action == "block":
+        db_data = load_data()
+        if target_id_str not in db_data["blacklist"]:
+            db_data["blacklist"].append(target_id_str)
+            save_data(db_data)
+            answer_callback_query(query_id, text=f"✅ 用户 {target_id_str} 已被拉黑")
+        else:
+            answer_callback_query(query_id, text=f"ℹ️ 用户 {target_id_str} 已在黑名单中")
+
+# --- 命令菜单设置 ---
+
+def set_user_commands():
+    commands = [
+        {"command": "start", "description": "启动机器人"},
+        {"command": "help", "description": "查看帮助信息"}
+    ]
+    requests.post(f"{BOT_URL}/setMyCommands", json={
+        "commands": commands,
+        "scope": {"type": "default"}
+    })
+
+def set_admin_commands():
+    commands = [
+        {"command": "broadcast", "description": "广播消息"},
+        {"command": "block", "description": "拉黑用户"},
+        {"command": "unblock", "description": "解除拉黑"},
+        {"command": "help", "description": "查看帮助信息"}
+    ]
+    requests.post(f"{BOT_URL}/setMyCommands", json={
+        "commands": commands,
+        "scope": {"type": "chat", "chat_id": ADMIN_ID}
+    })
+
+# --- 健康检查 ---
 @app.route("/", methods=["GET"])
 def index():
     return "Bot is running!", 200
 
+# --- 启动 ---
 if __name__ == '__main__':
+    # 启动后立即设置菜单
+    set_user_commands()
+    set_admin_commands()
+
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
