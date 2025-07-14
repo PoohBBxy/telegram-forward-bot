@@ -248,7 +248,60 @@ def handle_admin_message(message):
     message_id = message["message_id"]
     user_id = message["from"]["id"]
 
-    data = load_data()
+    # 新增：检查是否是回复消息
+    reply_to_message = message.get("reply_to_message")
+    if reply_to_message:
+        reply_to_msg_id = reply_to_message["message_id"]
+        
+        data = load_data()
+        pending_key = str(reply_to_msg_id)
+        
+        # 检查回复的消息是否在待处理操作中
+        if pending_key in data.get("pending_actions", {}):
+            action = data["pending_actions"].pop(pending_key)
+            save_data(data)
+            
+            if action["type"] == "block":
+                target_id = action["target_id"]
+                reason = text.strip()
+                
+                if not reason:
+                    send_message(ADMIN_ID, "❌ 拉黑原因不能为空！")
+                    # 重新添加待处理操作
+                    data = load_data()
+                    data["pending_actions"][pending_key] = action
+                    save_data(data)
+                    return
+                    
+                # 执行拉黑操作
+                data = load_data()
+                if target_id not in data["blacklist"]:
+                    data["blacklist"][target_id] = reason
+                    save_data(data)
+                    update_stats("blacklist")
+                    send_message(ADMIN_ID, f"✅ 用户 {target_id} 已被加入黑名单。\n原因: {reason}")
+                    
+                    # 通知被拉黑用户
+                    try:
+                        send_message(int(target_id), f"🚫 你已被管理员加入黑名单，无法再继续使用本机器人。\n原因: {reason}")
+                    except Exception as e:
+                        print(f"向 {target_id} 发送拉黑通知失败：{e}")
+                else:
+                    current_reason = data["blacklist"][target_id]
+                    send_message(ADMIN_ID, f"ℹ️ 用户 {target_id} 已在黑名单中。\n当前原因: {current_reason}")
+                
+                # 更新原始消息
+                try:
+                    requests.post(f"{BOT_URL}/editMessageText", json={
+                        "chat_id": action["original_chat_id"],
+                        "message_id": action["original_message_id"],
+                        "text": f"[已处理] 用户 {target_id} 已被拉黑",
+                        "reply_markup": json.dumps({"inline_keyboard": []})
+                    })
+                except Exception as e:
+                    print(f"更新原始消息失败: {e}")
+                    
+                return
     
     # 检查是否是待处理的操作
     if str(message_id) in data.get("pending_actions", {}):
@@ -656,24 +709,33 @@ def handle_callback_query(callback_query):
             return
         answer_callback_query(query_id)
 
+    # 修改后的 handle_callback_query 函数中的 block 处理部分
     elif data.startswith("block_"):
         target_id_str = data.split("_", 1)[1]
         force_reply_markup = json.dumps({
             "force_reply": True,
             "input_field_placeholder": "请输入拉黑原因..."
         })
-        msg = send_message(ADMIN_ID, 
-                          f"🚫 请输入拉黑用户 {target_id_str} 的原因：", 
-                          reply_markup=force_reply_markup)
         
-        if not msg or "message_id" not in msg:
-            answer_callback_query(query_id, text="❌ 操作失败，请重试", show_alert=True)
-            return
+        # 修复：添加更健壮的错误处理
+        try:
+            msg = send_message(ADMIN_ID, 
+                             f"🚫 请输入拉黑用户 {target_id_str} 的原因：", 
+                             reply_markup=force_reply_markup)
             
+            if not msg or "message_id" not in msg.get("result", {}):
+                print(f"发送拉黑原因提示失败: {msg}")
+                answer_callback_query(query_id, text="❌ 发送请求失败，请稍后再试", show_alert=True)
+                return
+        except Exception as e:
+            print(f"发送拉黑原因提示异常: {e}")
+            answer_callback_query(query_id, text="❌ 系统错误，请稍后再试", show_alert=True)
+            return
+        
         # 存储待处理的拉黑操作
         data = load_data()
         data.setdefault("pending_actions", {})
-        data["pending_actions"][str(msg["message_id"])] = {
+        data["pending_actions"][str(msg["result"]["message_id"])] = {
             "type": "block",
             "target_id": target_id_str,
             "original_message_id": message_id,
