@@ -11,7 +11,6 @@ import logging
 import jieba
 from rapidfuzz import fuzz
 
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
@@ -82,6 +81,7 @@ def load_keywords():
 def save_keywords(data):
     with open(KEYWORD_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
 
 def semantic_match(text):
     """
@@ -247,14 +247,14 @@ def handle_user_message(message):
     if text == "联系客服":
         send_message(ADMIN_ID, f"👤 用户 {user_id} 请求人工客服")
         rmkb = json.dumps({"remove_keyboard": True})
-        send_message(user_id,"✅ 已收到您的人工客服请求，请稍候，客服人员将尽快联系您。",reply_markup=rmkb)
+        send_message(user_id, "✅ 已收到您的人工客服请求，请稍候，客服人员将尽快联系您。", reply_markup=rmkb)
         return
 
     data = load_data()
 
     # 检查用户是在做申诉回复
     reply_to = message.get("reply_to_message")
-    if reply_to and reply_to.get("text","").startswith("ℹ️ 请填写你的申诉理由"):
+    if reply_to and reply_to.get("text", "").startswith("ℹ️ 请填写你的申诉理由"):
         user_id = str(message["from"]["id"])
         appeal_reason = message.get("text", "").strip()
         if not appeal_reason:
@@ -265,8 +265,8 @@ def handle_user_message(message):
         block_reason = data["blacklist"].get(user_id, "未知原因")
         # 发给管理员
         kb = {"inline_keyboard": [[
-            {"text":"解除拉黑","callback_data":f"admin_unblock_{user_id}"},
-            {"text":"拒绝申诉","callback_data":f"deny_appeal_{user_id}"}
+            {"text": "解除拉黑", "callback_data": f"admin_unblock_{user_id}"},
+            {"text": "拒绝申诉", "callback_data": f"deny_appeal_{user_id}"}
         ]]}
         send_message(ADMIN_ID,
                      f"📢 用户 {user_id} 申请申诉：\n"
@@ -279,7 +279,7 @@ def handle_user_message(message):
         d.get("pending_actions", {}).pop(f"appeal_{user_id}", None)
         save_data(d)
         return
-    
+
     # 检查用户是否在黑名单中
     if str(user_id) in data["blacklist"]:
         reason = data["blacklist"][str(user_id)]
@@ -319,6 +319,7 @@ def handle_user_message(message):
 3. 输入 /start 重新显示欢迎信息
 4. 输入 /help 显示此帮助信息
 5. 输入 /about 了解更多关于我们的信息
+6. 输入 /to_human 请求人工帮助
 
 尝试输入一些关键词触发隐藏功能哦！"""
         send_message(user_id, help_text)
@@ -327,7 +328,7 @@ def handle_user_message(message):
 
         这是一个智能客服机器人，由管理员团队维护。
         我们致力于提供优质的服务，如有任何问题或建议，请随时留言。
-        
+
         版本: v2.0.0
         更新日期: 2025年7月
         """
@@ -345,7 +346,6 @@ def handle_user_message(message):
             update_stats("egg_hit")
             return
 
-
         # 转发消息给管理员
         forward_text = f"👤 用户 @{username} (ID:{user_id}) 发来消息：\n\n{text}"
         keyboard = {
@@ -357,13 +357,20 @@ def handle_user_message(message):
             ]
         }
         send_message(ADMIN_ID, forward_text, reply_markup=json.dumps(keyboard))
-        human_kb = {
-            "inline_keyboard": [
-                [{"text": "转人工客服", "callback_data": "to_human"}]
-            ]
-        }
-        send_message(user_id,"🤖 如果需要人工客服，请点击下方按钮。",reply_markup=json.dumps(human_kb))
-
+        human_triggers = ["人工", "客服", "转人工", "人工帮忙", "人工客服", "爆炸", "自杀"]
+        if any(w in text for w in human_triggers):
+            kb = {"inline_keyboard": [[{"text": "转人工客服", "callback_data": "to_human"}]]}
+            send_message(user_id, "🤖 检测到您需要人工帮助，点击下方按钮转接人工客服。", reply_markup=json.dumps(kb))
+        else:
+            # 或者上下文触发：连续两次未命中时
+            session = data["users"].setdefault(str(user_id), {}).setdefault("fallback_count", 0)
+            data["users"][str(user_id)]["fallback_count"] = session + 1
+            save_data(data)
+            if data["users"][str(user_id)]["fallback_count"] >= 2:
+                kb = {"inline_keyboard": [[{"text": "转人工客服", "callback_data": "to_human"}]]}
+                send_message(user_id, "🤖 看来机器人无法解决您的问题，是否需要人工客服？", reply_markup=json.dumps(kb))
+                data["users"][str(user_id)]["fallback_count"] = 0
+                save_data(data)
 
 # --- 管理员消息处理 ---
 def handle_admin_message(message):
@@ -445,7 +452,7 @@ def handle_admin_message(message):
                     if not reply_text:
                         send_message(ADMIN_ID, "❌ 回复内容不能为空！")
                         return
-    
+
                     send_message(int(target_id), f"📨 管理员回复：\n\n{reply_text}")
                     send_message(ADMIN_ID, f"✅ 已成功回复用户 {target_id}")
                     update_stats("admin_reply")
@@ -455,10 +462,12 @@ def handle_admin_message(message):
                     uid = action["target_id"]
                     reason = text.strip()
                     if not reason:
-                        send_message(ADMIN_ID, "❌ 原因不能为空！"); return
+                        send_message(ADMIN_ID, "❌ 原因不能为空！");
+                        return
                     d = load_data()
                     d["blacklist"][uid] = reason
-                    save_data(d); update_stats("blacklist")
+                    save_data(d);
+                    update_stats("blacklist")
                     send_message(ADMIN_ID, f"✅ 用户 {uid} 已被拉黑，原因：{reason}")
                     send_message(int(uid), f"🚫 你已被拉黑，原因：{reason}")
                     # 更新原键盘
@@ -466,9 +475,9 @@ def handle_admin_message(message):
                         "chat_id": reply_to["chat"]["id"],
                         "message_id": reply_to["message_id"],
                         "text": f"[已处理] 用户 {uid} 被拉黑 ({reason})",
-                        "reply_markup": json.dumps({"inline_keyboard":[]})
+                        "reply_markup": json.dumps({"inline_keyboard": []})
                     })
-    
+
                 else:
                     current_reason = data["blacklist"][target_id]
                     send_message(ADMIN_ID, f"ℹ️ 用户 {target_id} 已在黑名单中。\n原因: {current_reason}")
@@ -483,8 +492,6 @@ def handle_admin_message(message):
                     })
                 except Exception as e:
                     logging.warning(f"更新原始拉黑按钮消息失败：{e}")
-
-            
 
     # 情况 3：最后兜底，直接 message_id 命中 pending_actions 的情况（极少出现）
     if message_id in data.get("pending_actions", {}):
@@ -672,7 +679,6 @@ def handle_admin_message(message):
             send_message(ADMIN_ID, help_text)
 
 
-
 # --- 按钮操作处理 ---
 def handle_callback_query(callback_query):
     query_id = callback_query["id"]
@@ -683,7 +689,7 @@ def handle_callback_query(callback_query):
 
     if data == "to_human":
         send_message(ADMIN_ID, f"👤 用户 {from_user_id} 点击“转人工客服”")
-        send_message(from_user_id,"✅ 您已请求人工客服，请稍后，客服人员将尽快联系您。")
+        send_message(from_user_id, "✅ 您已请求人工客服，请稍后，客服人员将尽快联系您。")
         requests.post(f"{BOT_URL}/editMessageReplyMarkup", json={
             "chat_id": chat_id,
             "message_id": message_id,
@@ -693,7 +699,7 @@ def handle_callback_query(callback_query):
         return
 
     if data.startswith("appeal_"):
-        user_to_appeal = data.split("_",1)[1]
+        user_to_appeal = data.split("_", 1)[1]
         # 仅允许被黑名单中的用户申诉
         if user_to_appeal in load_data().get("blacklist", {}):
             # 让用户填写申诉理由
@@ -713,7 +719,7 @@ def handle_callback_query(callback_query):
         else:
             answer_callback_query(query_id, text="ℹ️ 你当前不在黑名单中，无需申诉。", show_alert=True)
         return
-    
+
     if from_user_id != ADMIN_ID:
         answer_callback_query(query_id, text="❌ 你没有权限操作。")
         return
@@ -951,22 +957,22 @@ def handle_callback_query(callback_query):
             answer_callback_query(query_id, text=error_msg, show_alert=True)
 
     elif data.startswith("block_"):
-        target_id = data.split("_",1)[1]
+        target_id = data.split("_", 1)[1]
         reasons = ["spam", "违规语言", "恶意刷屏", "其他…"]
-        kb = {"inline_keyboard":[
+        kb = {"inline_keyboard": [
             [{"text": r, "callback_data": f"blockreason_{target_id}|{r}"}]
             for r in reasons
         ]}
         send_message(ADMIN_ID,
-            f"🚫 请选择拉黑原因，用户 {target_id}：",
-            reply_markup=json.dumps(kb)
-        )
+                     f"🚫 请选择拉黑原因，用户 {target_id}：",
+                     reply_markup=json.dumps(kb)
+                     )
         answer_callback_query(query_id)
         return
 
     elif data.startswith("blockreason_"):
-        payload = data.split("_",1)[1]  # "12345|其他…"
-        uid, reason = payload.split("|",1)
+        payload = data.split("_", 1)[1]  # "12345|其他…"
+        uid, reason = payload.split("|", 1)
         if reason == "其他…":
             # ForceReply 写具体原因
             fr = json.dumps({
@@ -977,21 +983,31 @@ def handle_callback_query(callback_query):
             # 存 pending_actions 标记
             d = load_data()
             d.setdefault("pending_actions", {})[str(message_id)] = {
-                "type":"block_other","target_id":uid
+                "type": "block_other",
+                "target_id": uid,
+                "original_chat_id": chat_id,
+                "original_message_id": message_id
             }
             save_data(d)
         else:
             # 直接拉黑
             d = load_data()
             d["blacklist"][uid] = reason
-            save_data(d); update_stats("blacklist")
+            save_data(d);
+            update_stats("blacklist")
             send_message(ADMIN_ID, f"✅ 用户 {uid} 已被拉黑，原因：{reason}")
-            send_message(int(uid), f"🚫 你已被拉黑，原因：{reason}")
+            # 给用户发送申诉按钮
+            appeal_kb = {
+                "inline_keyboard": [
+                    [{"text": "我要申诉！", "callback_data": f"appeal_{uid}"}]
+                ]
+            }
+            send_message(int(uid),f"🚫 你已被管理员拉黑，原因：{reason}",reply_markup=json.dumps(appeal_kb))
             # 更新原按钮
             requests.post(f"{BOT_URL}/editMessageText", json={
-                "chat_id": chat_id,"message_id":message_id,
-                "text":f"[已处理] 用户 {uid} 被拉黑 ({reason})",
-                "reply_markup":json.dumps({"inline_keyboard":[]})
+                "chat_id": chat_id, "message_id": message_id,
+                "text": f"[已处理] 用户 {uid} 被拉黑 ({reason})",
+                "reply_markup": json.dumps({"inline_keyboard": []})
             })
         answer_callback_query(query_id)
         return
@@ -999,12 +1015,13 @@ def handle_callback_query(callback_query):
 
 
     elif data.startswith("admin_unblock_"):
-        uid = data.split("_",2)[2]
+        uid = data.split("_", 2)[2]
         # 1) 解除黑名单
         d = load_data()
         if uid in d["blacklist"]:
             del d["blacklist"][uid]
-            save_data(d); update_stats("blacklist")
+            save_data(d);
+            update_stats("blacklist")
             send_message(ADMIN_ID, f"✅ 已解除用户 {uid} 的黑名单。")
             send_message(int(uid), "✅ 管理员已同意你的申诉，已解除拉黑。")
         else:
@@ -1018,9 +1035,9 @@ def handle_callback_query(callback_query):
         })
         answer_callback_query(query_id)
         return
-    
+
     elif data.startswith("deny_appeal_"):
-        uid = data.split("_",2)[2]
+        uid = data.split("_", 2)[2]
         send_message(ADMIN_ID, f"❌ 已拒绝用户 {uid} 的申诉。")
         send_message(int(uid), "❌ 管理员已拒绝你的申诉，仍维持黑名单状态。")
         # 更新原按钮消息为“已处理”
@@ -1033,12 +1050,14 @@ def handle_callback_query(callback_query):
         answer_callback_query(query_id)
         return
 
+
 # --- 命令菜单设置 ---
 def set_user_commands():
     commands = [
         {"command": "start", "description": "启动机器人"},
         {"command": "help", "description": "查看帮助信息"},
-        {"command": "about", "description": "了解更多关于我们的信息"}
+        {"command": "about", "description": "了解更多关于我们的信息"},
+        {"command": "to_human", "description": "请求人工服务"}
     ]
     requests.post(f"{BOT_URL}/setMyCommands", json={
         "commands": commands,
@@ -1049,8 +1068,8 @@ def set_user_commands():
 def set_admin_commands():
     commands = [
         {"command": "broadcast", "description": "广播消息给所有用户"},
-        {"command": "block", "description": "拉黑用户 - /block <用户ID> <原因>"},
-        {"command": "unblock", "description": "解除拉黑 - /unblock <用户ID>"},
+        {"command": "block", "description": "拉黑用户 -用法： /block <用户ID> <原因>"},
+        {"command": "unblock", "description": "解除拉黑 -用法： /unblock <用户ID>"},
         {"command": "blacklist", "description": "查看黑名单列表"},
         {"command": "stats", "description": "查看机器人统计信息"},
         {"command": "egg", "description": "管理彩蛋关键词"},
